@@ -1,0 +1,18 @@
+{
+  "name": "@evolab/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@evolab/evolution": "*",
+    "@evolab/sim": "*"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  }
+}

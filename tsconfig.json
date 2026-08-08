@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "apps/web/src/**/*.ts",
+    "apps/web/*.ts",
+    "scripts/**/*.ts"
+  ]
+}
