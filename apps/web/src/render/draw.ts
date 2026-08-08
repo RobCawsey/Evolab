@@ -32,8 +32,14 @@ const COLOURS = {
   fallen: '#d9625c',
 } as const;
 
-export function draw(ctx: CanvasRenderingContext2D, snap: Snapshot, widthPx: number, heightPx: number): void {
-  const cam = fitCamera(widthPx, heightPx);
+export function draw(
+  ctx: CanvasRenderingContext2D,
+  snap: Snapshot,
+  widthPx: number,
+  heightPx: number,
+  focusX = 0,
+): void {
+  const cam = fitCamera(widthPx, heightPx, focusX);
 
   ctx.fillStyle = COLOURS.bg;
   ctx.fillRect(0, 0, widthPx, heightPx);

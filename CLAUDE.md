@@ -18,14 +18,19 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
-**Slice 0 — "It falls over".** A jointed 2D biped ragdolls onto a floor under Rapier
-physics, rendered to a canvas. No controller, no GA, no UI. That is the whole point of
-slice 0: prove the physics and the render loop, nothing else.
+**Slice 1 — "It walks, badly".** An open-loop parametric controller drives the joint
+motors, with eleven live sliders. The default gait lurches backwards and falls at 2 s; the
+best gait found so far walks 12.6 m without falling.
 
-Next: slice 1 — a sinusoid controller with sliders, to discover by hand how bad
-hand-tuning is. It is specified in full in
-[docs/implementation.md](docs/implementation.md#slice-1--it-walks-badly): controller
-formula, parameter ranges, the Rapier motor API to reach for, and what "done" means.
+Before touching the physics, read
+[the motor stiffness trap](docs/implementation.md#the-motor-stiffness-trap). A whole
+session went into diagnosing "this biped cannot balance open-loop, that is a fundamental
+limit" when the actual cause was motor gains being 200× too small. The lesson recorded
+there is worth more than the fix.
+
+Next: slice 2 — the genetic algorithm. Specified in full in
+[docs/implementation.md](docs/implementation.md#slice-2--the-ga-finds-a-gait): genome
+layout, SBX and polynomial mutation formulas, island signatures, and the golden test.
 
 Before starting a slice, read its section. After finishing one, rewrite that section to
 describe what was actually built and expand the next one.

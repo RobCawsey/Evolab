@@ -88,6 +88,13 @@ export function createSliders(
       (p, v) => ({ ...p, frequency: v }),
       ' Hz',
     ),
+    row(
+      'balance',
+      GAIT_RANGES.balanceGain[0],
+      GAIT_RANGES.balanceGain[1],
+      (p) => p.balanceGain,
+      (p, v) => ({ ...p, balanceGain: v }),
+    ),
   );
   frag.append(freq);
 
@@ -139,7 +146,7 @@ function heading(text: string): HTMLElement {
  */
 export function encodeGait(p: GaitParams): string {
   const n = [
-    p.frequency,
+    p.frequency, p.balanceGain,
     p.hip.amplitude, p.hip.phase, p.hip.centre,
     p.knee.amplitude, p.knee.phase, p.knee.centre,
     p.ankle.amplitude, p.ankle.phase, p.ankle.centre,
@@ -149,11 +156,12 @@ export function encodeGait(p: GaitParams): string {
 
 export function decodeGait(text: string, fallback: GaitParams): GaitParams {
   const n = text.split(',').map(Number);
-  if (n.length !== 10 || n.some((v) => !Number.isFinite(v))) return fallback;
+  if (n.length !== 11 || n.some((v) => !Number.isFinite(v))) return fallback;
   return {
     frequency: n[0]!,
-    hip: { amplitude: n[1]!, phase: n[2]!, centre: n[3]! },
-    knee: { amplitude: n[4]!, phase: n[5]!, centre: n[6]! },
-    ankle: { amplitude: n[7]!, phase: n[8]!, centre: n[9]! },
+    balanceGain: n[1]!,
+    hip: { amplitude: n[2]!, phase: n[3]!, centre: n[4]! },
+    knee: { amplitude: n[5]!, phase: n[6]!, centre: n[7]! },
+    ankle: { amplitude: n[8]!, phase: n[9]!, centre: n[10]! },
   };
 }

@@ -4,7 +4,7 @@
  */
 
 import RAPIER from '@dimforge/rapier2d-compat';
-import type { Morphology, Rng } from '@evolab/evolution';
+import type { ControlState, Morphology, Rng } from '@evolab/evolution';
 
 /** Physics runs at a fixed timestep. Never step by frame delta. */
 export const TIMESTEP = 1 / 240;
@@ -12,15 +12,30 @@ export const TIMESTEP = 1 / 240;
 /**
  * Default position-motor gains.
  *
- * `MotorModel.AccelerationBased` makes the motor solve for acceleration rather than
- * force, so gains do not have to be re-scaled per limb inertia — one pair of numbers
- * works for a 6 kg torso and a 0.6 kg foot alike. Treating them as a PD controller:
- * stiffness is P and damping is D, giving a natural frequency of sqrt(400) = 20 rad/s
- * (≈3.2 Hz) and a damping ratio of 1.0. Comfortably able to track a 1.4 Hz gait, and
- * comfortably stable at a 240 Hz step.
+ * `MotorModel.AccelerationBased` makes the motor solve for acceleration rather than force,
+ * so gains do not have to be re-scaled per limb inertia — one pair of numbers works for a
+ * 6 kg torso and a 0.6 kg foot alike.
+ *
+ * These need to be far larger than a first guess suggests, and getting that wrong cost a
+ * whole diagnostic session in slice 1. A motor is a spring, not a rigid link: under a
+ * sustained gravitational moment it deflects, the deflection moves the centre of mass
+ * further off the support, and that increases the moment. Below roughly k = 40 000 the
+ * biped cannot hold a standing pose at all and topples in about a second — which reads
+ * exactly like a fundamental limit of open-loop control, and is not one.
+ *
+ * Measured, holding the rest pose against a 0.03 rad initial tilt for 10 s:
+ *
+ *   k =  20 000  falls at 2.1 s
+ *   k =  40 000  stands, but fails at a 0.08 rad tilt
+ *   k =  80 000  stands at every tilt tried            <- chosen
+ *   k = 100 000  stands, torso angle stays at 0.000
+ *
+ * Cross-checked against welded joints: replacing every revolute with a fixed joint, or
+ * clamping the limits to (0, 0), also stands indefinitely. So the articulation is sound
+ * and only the actuator authority was wrong.
  */
-export const MOTOR_STIFFNESS = 400;
-export const MOTOR_DAMPING = 40;
+export const MOTOR_STIFFNESS = 80_000;
+export const MOTOR_DAMPING = 8_000;
 
 /**
  * Collision filtering: robot parts collide with the ground but never with each other.
@@ -201,6 +216,23 @@ export class Sim {
 
   get time(): number {
     return this.stepCount * TIMESTEP;
+  }
+
+  /**
+   * What the controller is allowed to sense: which way the torso is leaning and how fast.
+   *
+   * Deliberately separate from `snapshot()`, which allocates arrays and maps for the
+   * renderer. This runs 60 times per simulated second and, from slice 2, millions of times
+   * per run — it must stay allocation-free apart from the returned pair.
+   *
+   * Rapier's rotation is anticlockwise-positive, so a torso leaning forward (its top
+   * moving towards +x) has a negative rotation. Pitch negates it, so that positive means
+   * falling forward and the balance gain reads as a corrective term.
+   */
+  controlState(): ControlState {
+    const torso = this.bodies.get('torso');
+    if (!torso) return { pitch: 0, pitchRate: 0 };
+    return { pitch: -torso.rotation(), pitchRate: -torso.angvel() };
   }
 
   /**

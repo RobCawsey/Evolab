@@ -30,7 +30,7 @@ export function stepControlled(
   const targets = scratch ?? new Map<string, number>();
   for (let i = 0; i < steps; i++) {
     if (sim.steps % CONTROL_EVERY === 0) {
-      gaitTargets(morph, params, sim.time, targets);
+      gaitTargets(morph, params, sim.time, sim.controlState(), targets);
       sim.setJointTargets(targets);
     }
     sim.step();

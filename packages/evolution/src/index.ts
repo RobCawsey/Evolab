@@ -8,5 +8,7 @@ export {
   withJointParam,
   GAIT_RANGES,
   JOINT_KINDS,
+  PITCH_LEAD,
+  STILL,
 } from './controller.ts';
-export type { GaitParams, JointGait, JointKind } from './controller.ts';
+export type { GaitParams, JointGait, JointKind, ControlState } from './controller.ts';

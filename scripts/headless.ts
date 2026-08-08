@@ -67,10 +67,11 @@ function trial(params: GaitParams, seed: number, label: string, verbose = false)
  * GA rather than with the physics.
  */
 const BEST_KNOWN: GaitParams = {
-  frequency: 0.6,
-  hip: { amplitude: 0.734, phase: 4.451, centre: 0.061 },
-  knee: { amplitude: 0.624, phase: 5.962, centre: -0.189 },
-  ankle: { amplitude: 0.419, phase: 4.31, centre: 0.134 },
+  frequency: 1.671,
+  balanceGain: 0.69,
+  hip: { amplitude: 0.793, phase: 5.349, centre: 0.167 },
+  knee: { amplitude: 0.121, phase: 1.307, centre: -0.066 },
+  ankle: { amplitude: 0.27, phase: 6.283, centre: 0.008 },
 };
 
 trial(gait, SEED, 'default gait', true);

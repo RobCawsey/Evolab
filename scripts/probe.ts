@@ -10,74 +10,89 @@ import { initPhysics, Sim, stepControlled, TIMESTEP } from '../packages/sim/src/
 
 await initPhysics();
 const morph = simpleBiped();
-const SECONDS = 6;
-const steps = Math.round(SECONDS / TIMESTEP);
+const SECS = 10;
+const steps = Math.round(SECS / TIMESTEP);
+const scratch = new Map<string, number>();
 
-function run(params: GaitParams, stiffness: number, damping: number, tilt = 0) {
-  const sim = new Sim(morph, { tilt, motorStiffness: stiffness, motorDamping: damping });
-  const scratch = new Map<string, number>();
-  let fellAt: number | null = null;
-  let peak = 0;
-  let minHeight = Infinity;
+function run(p: GaitParams, tilt = 0) {
+  const sim = new Sim(morph, { tilt });
+  let upright = 0, peak = 0, fellAt: number | null = null;
   for (let i = 0; i <= steps; i++) {
     const s = sim.snapshot();
-    if (fellAt === null && s.fallen) fellAt = s.time;
-    peak = Math.max(peak, Math.abs(s.distance));
-    minHeight = Math.min(minHeight, s.torsoHeight);
-    if (i < steps) stepControlled(sim, morph, params, 1, scratch);
+    if (s.fallen) { fellAt = s.time; break; }
+    upright = s.time;
+    peak = Math.max(peak, s.distance);
+    if (i < steps) stepControlled(sim, morph, p, 1, scratch);
   }
-  const f = sim.snapshot();
   sim.dispose();
-  return { distance: f.distance, fellAt, minHeight, height: f.torsoHeight };
+  return { peak, upright, fellAt, fitness: peak + 0.5 * (upright / SECS) };
 }
 
-const still = (): GaitParams => ({
+const still = (gain: number): GaitParams => ({
   frequency: 1,
+  balanceGain: gain,
   hip: { amplitude: 0, phase: 0, centre: 0 },
   knee: { amplitude: 0, phase: 0, centre: 0 },
   ankle: { amplitude: 0, phase: 0, centre: 0 },
 });
 
-const crouch = (): GaitParams => ({
-  ...still(),
-  hip: { amplitude: 0, phase: 0, centre: 0.1 },
-  knee: { amplitude: 0, phase: 0, centre: -0.35 },
-});
-
-console.log('=== can the motors hold a pose at all? (amplitude 0) ===');
-console.log('  gains          pose      final y   min y    fell');
-for (const [k, d] of [[100, 10], [400, 40], [1200, 70], [4000, 130]] as const) {
-  for (const [name, p] of [['straight', still()], ['crouched', crouch()]] as const) {
-    const r = run(p, k, d);
+console.log('=== can it stand? (no oscillation, balance gain only, 10 s) ===');
+console.log('  gain   tilt     upright   fell');
+for (const gain of [0, 0.5, 1, 1.5, 2.5, 4]) {
+  for (const tilt of [0, 0.03]) {
+    const r = run(still(gain), tilt);
     console.log(
-      `  k=${String(k).padStart(4)} d=${String(d).padStart(3)}  ${name.padEnd(9)} ` +
-      `${r.height.toFixed(3)} m   ${r.minHeight.toFixed(3)} m  ${r.fellAt === null ? 'no' : r.fellAt.toFixed(2) + ' s'}`,
+      `  ${gain.toFixed(1).padStart(4)}   ${tilt.toFixed(2)}   ` +
+      `${r.upright.toFixed(2).padStart(6)} s   ${r.fellAt === null ? 'never' : r.fellAt.toFixed(2) + ' s'}`,
     );
   }
 }
 
-console.log('\n=== default gait across gains ===');
-console.log('  gains          distance   fell');
-for (const [k, d] of [[400, 40], [1200, 70], [2500, 100], [4000, 130]] as const) {
-  const r = run(defaultGait(), k, d);
+console.log('\n=== default gait vs balance gain ===');
+console.log('  gain   distance   upright   fell');
+for (const gain of [0, 0.5, 1, 1.5, 2.5, 4]) {
+  const r = run({ ...defaultGait(), balanceGain: gain });
   console.log(
-    `  k=${String(k).padStart(4)} d=${String(d).padStart(3)}  ${r.distance.toFixed(3).padStart(7)} m   ` +
-    `${r.fellAt === null ? 'never' : r.fellAt.toFixed(2) + ' s'}`,
+    `  ${gain.toFixed(1).padStart(4)}   ${r.peak.toFixed(2).padStart(7)} m   ` +
+    `${r.upright.toFixed(2).padStart(6)} s   ${r.fellAt === null ? 'never' : r.fellAt.toFixed(2) + ' s'}`,
   );
 }
 
-console.log('\n=== a coarse sweep for anything that walks (k=2500 d=100) ===');
-const rng = new Rng(11);
-let best = { d: 0, p: null as GaitParams | null };
-for (let i = 0; i < 400; i++) {
-  const p: GaitParams = {
-    frequency: rng.range(0.8, 2.4),
-    hip: { amplitude: rng.range(0.1, 0.7), phase: rng.range(0, 6.28), centre: rng.range(-0.3, 0.3) },
-    knee: { amplitude: rng.range(0.1, 0.8), phase: rng.range(0, 6.28), centre: rng.range(-0.6, 0) },
-    ankle: { amplitude: rng.range(0, 0.4), phase: rng.range(0, 6.28), centre: rng.range(-0.3, 0.3) },
-  };
-  const r = run(p, 2500, 100);
-  if (r.distance > best.d) best = { d: r.distance, p };
+console.log('\n=== population search, 120 generations, 11 parameters ===');
+const rng = new Rng(99);
+const rnd = (): GaitParams => ({
+  frequency: rng.range(0.6, 2.6),
+  balanceGain: rng.range(0, 5),
+  hip: { amplitude: rng.range(0, 0.8), phase: rng.range(0, 6.283), centre: rng.range(-0.5, 0.5) },
+  knee: { amplitude: rng.range(0, 0.9), phase: rng.range(0, 6.283), centre: rng.range(-0.8, 0.1) },
+  ankle: { amplitude: rng.range(0, 0.5), phase: rng.range(0, 6.283), centre: rng.range(-0.4, 0.4) },
+});
+
+let pop = Array.from({ length: 24 }, () => { const p = rnd(); return { p, ...run(p) }; });
+for (let gen = 1; gen <= 120; gen++) {
+  pop.sort((a, b) => b.fitness - a.fitness);
+  const next = pop.slice(0, 2);
+  const s = 0.18 * (1 - gen / 150) + 0.02;
+  const mut = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v + rng.normal() * s * (hi - lo)));
+  while (next.length < 24) {
+    const pick = () => [pop[rng.int(24)]!, pop[rng.int(24)]!, pop[rng.int(24)]!]
+      .sort((x, y) => y.fitness - x.fitness)[0]!.p;
+    const c = pick();
+    const p: GaitParams = {
+      frequency: mut(c.frequency, .6, 2.6),
+      balanceGain: mut(c.balanceGain, 0, 5),
+      hip: { amplitude: mut(c.hip.amplitude,0,.8), phase: mut(c.hip.phase,0,6.283), centre: mut(c.hip.centre,-.5,.5) },
+      knee: { amplitude: mut(c.knee.amplitude,0,.9), phase: mut(c.knee.phase,0,6.283), centre: mut(c.knee.centre,-.8,.1) },
+      ankle: { amplitude: mut(c.ankle.amplitude,0,.5), phase: mut(c.ankle.phase,0,6.283), centre: mut(c.ankle.centre,-.4,.4) },
+    };
+    next.push({ p, ...run(p) });
+  }
+  pop = next;
+  if (gen % 20 === 0) {
+    const b = pop.reduce((x, y) => (y.fitness > x.fitness ? y : x));
+    console.log(`  gen ${String(gen).padStart(3)}  fitness ${b.fitness.toFixed(3)}  ` +
+      `dist ${b.peak.toFixed(2)} m  upright ${b.upright.toFixed(2)} s  gain ${b.p.balanceGain.toFixed(2)}`);
+  }
 }
-console.log(`  best of 400 random gaits: ${best.d.toFixed(3)} m`);
-if (best.p) console.log('  ' + JSON.stringify(best.p, (_, v) => (typeof v === 'number' ? +v.toFixed(3) : v)));
+const best = pop.reduce((x, y) => (y.fitness > x.fitness ? y : x));
+console.log('\nbest: ' + JSON.stringify(best.p, (_, v) => (typeof v === 'number' ? +v.toFixed(3) : v)));

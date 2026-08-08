@@ -26,10 +26,45 @@ export interface JointGait {
 export interface GaitParams {
   /** Gait cycle frequency, Hz. One cycle is one full stride (both legs). */
   readonly frequency: number;
+  /**
+   * Balance feedback: radians of extra hip flexion per radian of forward torso pitch.
+   *
+   * The one term that is not a function of time. Without it the controller has no
+   * world-frame reference at all and cannot know the robot is tipping, let alone correct
+   * it — see "the open-loop ceiling" in docs/implementation.md. Setting it to 0 restores
+   * the strictly open-loop controller, which is worth doing once to watch what happens.
+   */
+  readonly balanceGain: number;
   readonly hip: JointGait;
   readonly knee: JointGait;
   readonly ankle: JointGait;
 }
+
+/**
+ * The robot's own sense of which way is up. The only state the controller sees.
+ */
+export interface ControlState {
+  /** Torso pitch, radians. Positive is leaning forward. */
+  readonly pitch: number;
+  /** Rate of change of pitch, rad/s. Positive is falling forward. */
+  readonly pitchRate: number;
+}
+
+/**
+ * Lead time for the balance term, seconds.
+ *
+ * Proportional feedback alone lags — by the time a pitch error is large enough to correct,
+ * the robot already has the angular momentum to keep going, so it overshoots and
+ * oscillates. Feeding back `pitch + LEAD · pitchRate` is a first-order prediction of where
+ * the torso will be in 0.12 s, which damps the response.
+ *
+ * Deliberately a constant rather than a second gene: one tunable number is the whole point
+ * of choosing this option, and a fixed lead sets a sensible damping ratio for free.
+ */
+export const PITCH_LEAD = 0.12;
+
+/** No balance feedback and no state — for callers that only want the periodic part. */
+export const STILL: ControlState = { pitch: 0, pitchRate: 0 };
 
 /**
  * Bounds for every parameter. Used for slider extents now, and — unchanged — as the
@@ -38,6 +73,7 @@ export interface GaitParams {
  */
 export const GAIT_RANGES = {
   frequency: [0.5, 3.0],
+  balanceGain: [-2, 2],
   hip: { amplitude: [0, 0.8], phase: [0, 2 * Math.PI], centre: [-0.5, 0.5] },
   knee: { amplitude: [0, 0.9], phase: [0, 2 * Math.PI], centre: [-0.8, 0.1] },
   ankle: { amplitude: [0, 0.5], phase: [0, 2 * Math.PI], centre: [-0.4, 0.4] },
@@ -53,6 +89,7 @@ export const JOINT_KINDS: readonly JointKind[] = ['hip', 'knee', 'ankle'];
 export function defaultGait(): GaitParams {
   return {
     frequency: 1.4,
+    balanceGain: 0.5,
     hip: { amplitude: 0.4, phase: 0, centre: 0.1 },
     knee: { amplitude: 0.5, phase: 2.2, centre: -0.35 },
     ankle: { amplitude: 0.2, phase: 3.6, centre: 0 },
@@ -80,6 +117,7 @@ export function gaitTargets(
   morph: Morphology,
   params: GaitParams,
   t: number,
+  state: ControlState = STILL,
   out?: Map<string, number>,
 ): Map<string, number> {
   const targets = out ?? new Map<string, number>();
@@ -87,9 +125,15 @@ export function gaitTargets(
 
   const cyclePhase = 2 * Math.PI * params.frequency * t;
 
+  // One number, shared by both hips: how far forward the torso is predicted to be, times
+  // the gain. Driving the thighs forward against a forward lean pushes the torso back
+  // upright by reaction — the hip balance strategy, in one line.
+  const correction = params.balanceGain * (state.pitch + PITCH_LEAD * state.pitchRate);
+
   for (const joint of morph.joints) {
     const g = params[joint.kind];
-    const angle = g.centre + g.amplitude * Math.sin(cyclePhase + g.phase + SIDE_PHASE[joint.side]);
+    let angle = g.centre + g.amplitude * Math.sin(cyclePhase + g.phase + SIDE_PHASE[joint.side]);
+    if (joint.kind === 'hip') angle += correction;
     targets.set(joint.id, clamp(angle, joint.limits[0], joint.limits[1]));
   }
 

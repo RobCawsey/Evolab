@@ -21,7 +21,7 @@ first.
 - [Slice index](#slice-index)
 - **Slice 0** — [It falls over](#slice-0--it-falls-over) *(complete)*
 - **Slice 1** — [It walks, badly](#slice-1--it-walks-badly) *(complete — read
-  [the open-loop ceiling](#the-open-loop-ceiling))*
+  [the motor stiffness trap](#the-motor-stiffness-trap))*
 - **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait)
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it)
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
@@ -168,11 +168,18 @@ docs/                   this file and the design document
 
 ```
 apps/web  ->  packages/sim  ->  packages/evolution
-                                (types only; sim never imports operators)
 apps/web  ->  packages/evolution
 ```
 
-`packages/evolution` imports nothing from the other two. That is what keeps it testable.
+Exactly one rule, and it is the load-bearing one: **`packages/evolution` imports nothing
+from the other two.** That is what lets the whole search run under Node in a test.
+
+`packages/sim` does import from `evolution` — the morphology types and the controller, so
+that `stepControlled` can evaluate targets at the control rate. An earlier draft of this
+document said "types only"; that was wrong, and slice 2 makes it more so, since `evaluate`
+must decode a genome and run a controller. The real constraint is narrower: **sim never
+imports the search** — no operators, no island, no archive. Physics knows what a robot is
+and how to drive it; it does not know what a population is.
 
 ---
 
@@ -182,7 +189,7 @@ apps/web  ->  packages/evolution
 |---|---|---|---|
 | 0 | [It falls over](#slice-0--it-falls-over) | 1 | **complete** |
 | 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | **complete** |
-| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | blocked — see slice 1 |
+| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | next |
 | 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | planned |
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | planned |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
@@ -352,9 +359,9 @@ no 3D. Slice 0 proves the physics and the render loop and nothing else.
 
 ## Slice 1 — It walks, badly
 
-> **Status: complete**, with a finding that blocks slice 2. See
-> [The open-loop ceiling](#the-open-loop-ceiling) below — it needs a decision before the
-> genetic algorithm is worth building.
+> **Status: complete.** One session, plus a long diagnostic detour recorded in
+> [the motor stiffness trap](#the-motor-stiffness-trap) — worth reading before touching
+> the physics.
 
 ### Goal
 
@@ -506,61 +513,78 @@ joint comes back with `limitsEnabled() === false` and bounds of ±3.4e38. Limits
 applied to the created joint with `handle.setLimits(min, max)`. Slice 0 did it the first
 way, so the biped had no joint limits at all and its knees bent both directions.
 
-### The open-loop ceiling
+### The motor stiffness trap
 
-The biped cannot stay upright for more than about two seconds, whatever the gait
-parameters. This is not a tuning problem and not a bug; it is a property of the controller
-class. It caps everything downstream, so it needs a decision before slice 2.
+The biped originally could not stay upright for more than about a second whatever the gait
+parameters, and the first diagnosis of that was **wrong** in a way worth recording, because
+the wrong answer was plausible and well-evidenced.
 
-**Evidence, in the order it was gathered:**
+The symptom looked exactly like the textbook result that an inverted pendulum cannot be
+balanced open-loop: relative joint angles carry no world-frame reference, so no combination
+of them can know the robot is tipping. That reasoning was sound and the conclusion was
+false. The cause was mundane: **the motor gains were about two hundred times too small.**
 
-| Test | Result |
+A position motor is a spring, not a rigid link. Under a sustained gravitational moment it
+deflects, the deflection moves the centre of mass further off the support, and that
+increases the moment. That much was right. What was missed is that the runaway simply stops
+happening once the spring is stiff enough — it is a threshold, not an asymptote.
+
+**The test that settled it**, holding the rest pose against a 0.03 rad tilt for 12 s:
+
+| Joint treatment | Result |
 |---|---|
-| Single box resting on the ground | stable indefinitely |
-| Tall 0.92 m box on a 0.16 m base (rigid, pendulum-shaped) | **stable indefinitely** |
-| Two bodies joined by one locked revolute motor, `k` = 6000 | **falls to 90°** |
-| Full biped, all joints locked at 0, `k` = 6000, 32 solver iterations | falls at ≈1.9 s |
-| 2000 random gaits, scored on distance | p50 = 0.00 m, p99 = 0.05 m, max 0.69 m |
-| 120-generation population search, shaped fitness | plateaus at 0.73 m / 1.9 s upright |
+| Every revolute replaced by a fixed joint | stands 12 s |
+| Revolute with limits clamped to (0, 0) | stands 12 s |
+| Motor, `k` = 2 000 | falls at 1.10 s |
+| Motor, `k` = 20 000 | falls at 2.13 s |
+| **Motor, `k` = 100 000** | **stands 12 s, torso angle 0.000** |
 
-The third row is the explanation. **A position motor is a spring, not a rigid link.** Under
-a sustained gravitational moment it deflects; the deflection moves the centre of mass
-further off the support; that increases the moment. Positive feedback, and it collapses.
-Raising stiffness delays it and does not prevent it. Solver iterations make no difference.
+The first two rows prove the articulation and the contacts are sound. The last row proves
+the motors can hold it. Everything between was an actuator strength problem wearing a
+control theory costume.
 
-The second row rules out geometry: the same shape, rigid, stands forever on the same feet.
-The centre of mass sits at x = 0.003 m with 53 mm of margin to the heel edge and 107 mm to
-the toe. The morphology is fine. What is missing is that **nothing in the system references
-the world frame** — joint motors control relative angles only, so no combination of them
-can know the robot is tipping, let alone correct it.
+`MOTOR_STIFFNESS` is now **80 000** with damping at `k/10`, the lowest value that held the
+pose at every initial tilt tried. With it:
 
-This is the textbook result that an inverted pendulum cannot be balanced open-loop. §3 of
-the design document already says the parametric controller "cannot react"; what was not
-anticipated is that it cannot stand either.
+| Measurement | Before | After |
+|---|---|---|
+| Standing, no oscillation | falls at ≈1.1 s | stands indefinitely |
+| Default gait | 0.00 m, falls at 0.60 s | −1.53 m, falls at 2.00 s |
+| Best gait found by a 100-generation search | 0.73 m, falls at 1.9 s | **12.6 m, never falls** |
 
-**Do not fix this by changing the morphology.** Bigger feet or a lower torso would buy a
-few hundred milliseconds and would violate the rule in [CLAUDE.md](../CLAUDE.md) about
-tuning physics to make walking easier. The shortfall is three orders of magnitude of
-control authority, not a few centimetres of foot.
+**Lessons worth keeping.** When a physical system misbehaves, bisect the *mechanism* before
+theorising about the *class* of solution: welding the joints would have taken five minutes
+and pointed straight at the actuators. And an explanation that predicts "no parameter value
+will work" should always be tested by trying an absurd parameter value, because that test
+is cheap and the conclusion is expensive.
 
-**Options, for a decision before slice 2:**
+### The balance gene
 
-1. **Accept it.** Evolution optimises the best two-second lurch. The fitness curve still
-   climbs — the shaped-fitness search went 0.13 → 0.89 — so slices 2 and 3 still work
-   mechanically. But the slice-3 payoff is a robot that face-plants slightly further away
-   each generation, which is a weak reward for the project's most important moment.
-2. **Add one feedback term to the parametric controller** *(recommended)*. A single gene
-   coupling torso pitch to hip target — `hipTarget += k · torsoAngle` — gives the
-   controller a world-frame reference and makes balance reachable. It costs one parameter,
-   keeps every existing gene meaning exactly what it meant, and stays legible enough for
-   the slice-5 stepper. It does mean the controller is no longer strictly open loop, which
-   is a change to §3 of the design document.
-3. **Bring the CPG controller forward.** It has sensory feedback by construction and is
-   already specified as the second controller. Larger genome (`9J + 4`), less legible, and
-   a bigger slice.
+Slice 1 also added `balanceGain`, a single parameter coupling torso pitch to hip target:
 
-Option 2 is the smallest change that removes the ceiling, and it preserves the teaching
-argument for the parametric encoding.
+```
+correction = balanceGain · (pitch + PITCH_LEAD · pitchRate)
+hipTarget += correction
+```
+
+where pitch is forward-positive and `PITCH_LEAD = 0.12 s` is a fixed lead term — a
+first-order prediction of where the torso will be, so the response damps instead of
+oscillating. It is the one part of the controller that is not a function of time.
+
+**It does not currently earn its place**, and the honest record is that it was added to
+solve a problem that turned out to be something else. With the motor gains corrected, a
+100-generation search with the gene disabled reached 18.8 m and with it enabled reached
+16.5 m — a difference well inside run-to-run noise, and evolution drove the gain to 0.0 in
+the earlier under-powered runs.
+
+It is kept because it costs one parameter, the range spans zero so evolution can switch it
+off for free, and it is the mechanism the task suite will need on rough terrain and under
+pushes (§6 of the design document) where a purely periodic controller genuinely cannot
+react. Setting the slider to zero and watching what changes — nothing, on flat ground — is
+also a decent lesson in itself.
+
+Note this does mean the controller is no longer strictly open loop, a small amendment to §3
+of the design document.
 
 ### Deliberately not in this slice
 
@@ -571,10 +595,12 @@ controller is strictly a function of time — which turns out to be exactly the 
 
 ## Slice 2 — The GA finds a gait
 
-> **Status: blocked.** Two sessions once unblocked. The most important slice in the
-> project — and the reason the [open-loop ceiling](#the-open-loop-ceiling) found in slice 1
-> must be resolved first. The operator design below stands whichever option is chosen; what
-> changes is the genome layout and how far fitness can climb.
+> **Status: next.** Two sessions. The most important slice in the project.
+>
+> A 100-generation population search over these 11 parameters already reaches 12.6 m
+> without falling, using nothing but tournament selection and Gaussian mutation. That is
+> the bar a proper GA has to clear — if it does not, the fault is in the GA, not the
+> physics.
 
 ### Goal
 

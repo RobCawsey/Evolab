@@ -14,11 +14,13 @@ export interface Camera {
   readonly ay: number;
 }
 
-export function fitCamera(widthPx: number, heightPx: number): Camera {
+export function fitCamera(widthPx: number, heightPx: number, focusX = 0): Camera {
   // Frame roughly 1.8 m of height and 4 m of width, so a 0.92 m biped fills a useful
   // fraction of the canvas without the ground line crowding the bottom edge.
   const scale = Math.min(heightPx / 1.8, widthPx / 4);
-  return { scale, cx: 0, cy: 0, ax: widthPx * 0.5, ay: heightPx - Math.max(48, heightPx * 0.14) };
+  // Track the robot once it walks past a comfortable margin, so a 12 m gait stays on
+  // screen. The metre grid scrolls past, which is also how you see that it is moving.
+  return { scale, cx: focusX, cy: 0, ax: widthPx * 0.5, ay: heightPx - Math.max(48, heightPx * 0.14) };
 }
 
 export function toScreenX(cam: Camera, worldX: number): number {

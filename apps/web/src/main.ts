@@ -38,6 +38,7 @@ let sim: Sim | null = null;
 let accumulator = 0;
 let lastFrame = 0;
 let peakDistance = 0;
+let focusX = 0;
 const scratch = new Map<string, number>();
 
 const panel = createSliders(el('sliders'), gait, (next) => {
@@ -70,6 +71,7 @@ function respawn(nextSeed = seed): void {
   sim = new Sim(morph, { tilt: new Rng(seed).range(-0.02, 0.02) });
   accumulator = 0;
   peakDistance = 0;
+  focusX = 0;
 }
 
 function resize(): void {
@@ -108,8 +110,15 @@ function frame(now: number): void {
   const snap = sim.snapshot();
   peakDistance = Math.max(peakDistance, snap.distance);
 
+  // Follow the torso, but only once it has left the middle third — a camera that tracks
+  // every wobble makes it impossible to see whether the robot is actually moving.
+  const torsoX = snap.bodies.find((b) => b.id === 'torso')?.x ?? 0;
+  const deadzone = 0.7;
+  if (torsoX - focusX > deadzone) focusX = torsoX - deadzone;
+  else if (torsoX - focusX < -deadzone) focusX = torsoX + deadzone;
+
   const rect = canvas.getBoundingClientRect();
-  draw(ctx!, snap, rect.width, rect.height);
+  draw(ctx!, snap, rect.width, rect.height, focusX);
 
   hud.time.textContent = `${snap.time.toFixed(2)} s`;
   hud.distance.textContent = `${snap.distance.toFixed(2)} m  (peak ${peakDistance.toFixed(2)})`;
