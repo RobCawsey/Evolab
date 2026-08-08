@@ -4,9 +4,17 @@ A browser app for designing bipedal robots, evolving their walking gaits with a 
 algorithm, and learning how both work by watching them happen. Personal project, built in
 slices. Teaching tool first, simulator second.
 
-Full design: **[docs/technical-design.html](docs/technical-design.html)** — open it in a
-browser. 16 sections, 16 figures, every architectural decision and why it was made.
-When a question here is answered there, there wins.
+Two documents, different jobs:
+
+- **[docs/technical-design.html](docs/technical-design.html)** — the architecture and UI
+  specification. Open it in a browser. 16 sections, 16 figures, every architectural
+  decision and *why* it was made. Stable; changes only when a decision changes.
+- **[docs/implementation.md](docs/implementation.md)** — *how* each slice is built, and in
+  what order. Data structures, algorithms, formulas, acceptance criteria. A living
+  document: **updating it is part of finishing a slice.**
+
+When this file and the design document disagree, the design document wins. When the
+implementation guide and the code disagree, the code wins and the guide is stale — fix it.
 
 ## Current state
 
@@ -15,7 +23,12 @@ physics, rendered to a canvas. No controller, no GA, no UI. That is the whole po
 slice 0: prove the physics and the render loop, nothing else.
 
 Next: slice 1 — a sinusoid controller with sliders, to discover by hand how bad
-hand-tuning is. See §13 of the design doc for all 15 slices.
+hand-tuning is. It is specified in full in
+[docs/implementation.md](docs/implementation.md#slice-1--it-walks-badly): controller
+formula, parameter ranges, the Rapier motor API to reach for, and what "done" means.
+
+Before starting a slice, read its section. After finishing one, rewrite that section to
+describe what was actually built and expand the next one.
 
 ## Invariants
 

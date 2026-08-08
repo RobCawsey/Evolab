@@ -1,0 +1,1146 @@
+# Evolab — Implementation Guide
+
+How Evolab is built, slice by slice. For each stage: what it does, what it touches, the
+data structures and algorithms involved, and how you know it is finished.
+
+**Companion document:** [technical-design.html](technical-design.html) — the architecture
+and UI specification. That document answers *why*; this one answers *how*, and *in what
+order*. Where they disagree, the design document wins and this one is stale.
+
+**Audience:** a developer who has not seen the project before and needs to pick up any
+slice and implement it. Every section is meant to be actionable without reading the code
+first.
+
+---
+
+## Contents
+
+- [How to use this document](#how-to-use-this-document)
+- [Ground rules](#ground-rules)
+- [Module map](#module-map)
+- [Slice index](#slice-index)
+- **Slice 0** — [It falls over](#slice-0--it-falls-over) *(complete)*
+- **Slice 1** — [It walks, badly](#slice-1--it-walks-badly)
+- **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait)
+- **Slice 3** — [You can watch it](#slice-3--you-can-watch-it)
+- **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
+- **Slice 5** — [The stepper](#slice-5--the-stepper)
+- **Slice 6** — [Guided first run](#slice-6--guided-first-run)
+- **Slice 7** — [Body editor](#slice-7--body-editor)
+- **Slice 8** — [Behaviour archive](#slice-8--behaviour-archive)
+- **Slices 9–14** — [Later stages](#slices-914--later-stages)
+- [Appendix A — Rapier notes](#appendix-a--rapier-notes)
+- [Appendix B — Genome layouts](#appendix-b--genome-layouts)
+
+---
+
+## How to use this document
+
+Each slice has the same seven headings:
+
+| Heading | What it contains |
+|---|---|
+| **Goal** | One sentence. The observable change. |
+| **Depends on** | Which slices must exist first. |
+| **Design** | Data structures, algorithms, formulas. The substance. |
+| **Files** | What is created or changed. |
+| **Implementation notes** | Gotchas, API details, decisions already made. |
+| **Done when** | Concrete, checkable acceptance criteria. |
+| **Deliberately not in this slice** | Scope fence. Read this one twice. |
+
+### Detail decays with distance, on purpose
+
+Slices 0–4 are specified tightly: signatures, formulas, constants. Slices 5–8 are specified
+at the level of structure and approach. Slices 9–14 are sketches.
+
+This is deliberate. A precise specification for slice 12 written today would be wrong by
+the time it is built, and worse, it would look authoritative. **Each slice is written out
+in full detail at the end of the slice before it**, when the shape of the code is known.
+Updating this document is part of finishing a slice.
+
+### Maintaining it
+
+When a slice completes:
+
+1. Change its status to *complete*.
+2. Rewrite **Design** and **Implementation notes** to describe what was actually built,
+   not what was planned. Record numbers that were observed, not predicted.
+3. Add anything learned to **Implementation notes** — especially API surprises.
+4. Expand the next slice to full detail.
+5. Move any invariant worth enforcing into [CLAUDE.md](../CLAUDE.md).
+
+---
+
+## Ground rules
+
+These apply to every slice. They are the same invariants as [CLAUDE.md](../CLAUDE.md),
+restated with the reasoning.
+
+### 1. Fixed timestep
+
+Physics steps at exactly `TIMESTEP = 1/240 s`. The render loop accumulates elapsed real
+time and steps a whole number of times:
+
+```ts
+accumulator += dt;
+while (accumulator >= TIMESTEP && budget < 600) {
+  sim.step();
+  accumulator -= TIMESTEP;
+  budget++;
+}
+```
+
+Stepping by frame delta would make results depend on the display refresh rate and on how
+busy the machine was, which destroys both reproducibility and comparability between
+genomes. The `budget` cap stops a backgrounded tab from trying to catch up on ten seconds
+of physics in one frame — a spiral that would freeze the page.
+
+### 2. Seeded randomness only
+
+No `Math.random()` anywhere in `packages/`. An `Rng` instance is passed explicitly to
+anything that needs randomness. This is what makes a run replayable, a bug reproducible,
+and the golden test possible.
+
+### 3. `packages/evolution` is pure
+
+No DOM, no `window`, no timers, no Rapier import, no I/O. It must run under Node. When it
+needs to simulate, it takes an evaluator *function* as a parameter — it never imports the
+simulator.
+
+### 4. `packages/sim` owns Rapier and only Rapier
+
+Builds a world from a morphology, steps it, returns numbers. It does not render, and it
+does not know what a genome is.
+
+### 5. Nothing browser-specific below `apps/web`
+
+Workers, canvas, storage, UI — all live in the app.
+
+### 6. The golden test is never weakened to make a change pass
+
+Arrives in slice 2. If it fails, either the change is a bug or the change is intentional.
+Say which, in the commit message.
+
+### 7. SI units everywhere
+
+Metres, kilograms, seconds, radians. Pixels appear only under `apps/web/src/render/`.
+World space is y-up; canvas is y-down; the flip lives in `render/camera.ts` alone.
+
+### Definition of done, for every slice
+
+- `npm run check` passes with no errors.
+- `npm run sim` passes, including its determinism assertion.
+- The app runs. No slice ends with a broken tree.
+- One commit, whose message states the observable result (a time, a distance, a fitness).
+- This document updated per [Maintaining it](#maintaining-it).
+
+---
+
+## Module map
+
+```
+packages/evolution/     pure TypeScript, runs under Node
+  rng.ts                xoshiro128** — the only randomness in the project
+  morphology.ts         what a robot is: segments, joints, dimensions
+  controller.ts         (slice 1) genome -> joint targets over time
+  operators.ts          (slice 2) selection, crossover, mutation
+  island.ts             (slice 2) a population and its generation loop
+  fitness.ts            (slice 2) trial result -> scalar score
+  archive.ts            (slice 8) MAP-Elites grid
+
+packages/sim/           owns Rapier, nothing else
+  world.ts              morphology -> Rapier world; step; snapshot
+  evaluate.ts           (slice 2) run one genome for a trial, return numbers
+
+apps/web/               everything impure
+  main.ts               entry, render loop, input
+  render/camera.ts      the single world <-> screen transform
+  render/draw.ts        canvas 2D renderer
+  ui/                   (slice 1+) controls, charts, panels
+  workers/              (slice 4) island workers
+
+scripts/headless.ts     run the sim under Node with no browser
+docs/                   this file and the design document
+```
+
+### Dependency direction
+
+```
+apps/web  ->  packages/sim  ->  packages/evolution
+                                (types only; sim never imports operators)
+apps/web  ->  packages/evolution
+```
+
+`packages/evolution` imports nothing from the other two. That is what keeps it testable.
+
+---
+
+## Slice index
+
+| # | Name | Sessions | Status |
+|---|---|---|---|
+| 0 | [It falls over](#slice-0--it-falls-over) | 1 | **complete** |
+| 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | next |
+| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | planned |
+| 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | planned |
+| 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | planned |
+| 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
+| 6 | [Guided first run](#slice-6--guided-first-run) | 2 | planned |
+| 7 | [Body editor](#slice-7--body-editor) | 3 | planned |
+| 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | planned |
+| 9 | 3D replay | 3 | sketch |
+| 10 | Gait analysis | 2 | sketch |
+| 11 | Challenge track | 3 | sketch |
+| 12 | The server | 3 | sketch |
+| 13 | Community archive | 2 | sketch |
+| 14 | Task suite | 3 | sketch |
+
+**Slices 0–3 are the spine.** They end with a genetic algorithm evolving a gait while you
+watch a fitness curve climb. Everything after slice 3 is enrichment and can be reordered or
+skipped. A version of Evolab that stops at slice 8 is a finished thing, not an abandoned
+one.
+
+---
+
+## Slice 0 — It falls over
+
+> **Status: complete.** Commit `264628d`.
+
+### Goal
+
+A jointed 2D sagittal biped ragdolls onto a floor under Rapier physics, rendered to a
+canvas.
+
+### Depends on
+
+Nothing.
+
+### Design
+
+#### The morphology
+
+Seven rigid segments, six revolute joints, a rest pose standing 0.92 m tall with the feet
+flat on `y = 0`. All boxes; Rapier's `cuboid` takes **half**-extents.
+
+| Segment | Half-width | Half-height | Centre (x, y) | Layer |
+|---|---|---|---|---|
+| `torso` | 0.09 | 0.18 | (0, 0.74) | body |
+| `thighL` / `thighR` | 0.045 | 0.13 | (0, 0.43) | near / far |
+| `shankL` / `shankR` | 0.035 | 0.125 | (0, 0.175) | near / far |
+| `footL` / `footR` | 0.08 | 0.025 | (0.03, 0.025) | near / far |
+
+Density 1000 kg/m³ throughout, giving ≈ 21 kg total.
+
+| Joint | Parent → child | Parent anchor | Child anchor | Limits | Max torque |
+|---|---|---|---|---|---|
+| `hipL/R` | torso → thigh | (0, −0.18) | (0, 0.13) | −50°…90° | 120 N·m |
+| `kneeL/R` | thigh → shank | (0, −0.13) | (0, 0.125) | −132°…8° | 88 N·m |
+| `ankleL/R` | shank → foot | (0, −0.125) | (−0.03, 0.025) | −35°…25° | 60 N·m |
+
+Anchors are in each body's **local** frame. The chain closes because each anchor pair
+describes the same world point in the rest pose — e.g. the left hip is at world
+(0, 0.56), which is `torso.y − 0.18` and `thigh.y + 0.13`.
+
+`maxTorque` is carried but unused in slice 0; there is no controller yet.
+
+Both legs sit at `x = 0`. In a strictly sagittal model that is correct — they occupy the
+same plane. It is also why the renderer needs the offset described below.
+
+#### The world
+
+- Gravity `(0, −9.81)`.
+- Ground: a fixed `cuboid(60, 0.5)` centred at `y = −0.5`, so its top surface is exactly
+  `y = 0`. Friction 1.0.
+- Segment colliders: friction 0.9, restitution 0.
+
+#### Collision filtering
+
+Robot parts must collide with the ground but never with each other, or the legs jam
+against the torso. Rapier packs membership in the high 16 bits and the filter mask in the
+low 16:
+
+```ts
+const GROUP_GROUND = 0b0001;
+const GROUP_ROBOT  = 0b0010;
+const GROUND_GROUPS = (GROUP_GROUND << 16) | 0xffff;   // ground collides with everything
+const ROBOT_GROUPS  = (GROUP_ROBOT  << 16) | GROUP_GROUND; // robot collides with ground only
+```
+
+#### Making it fall
+
+`spawnFalling(morph, rng)` rotates the entire rest pose about the origin by a seeded angle
+in `[−0.09, 0.09]` rad, and sets each body's initial rotation to match. Rotating positions
+*and* orientations together keeps the joint constraints satisfied at `t = 0`, so there is
+no start-up jolt.
+
+A run is flagged `fallen` when the torso centre drops below 55 % of its rest height
+(0.55 × 0.74 ≈ 0.407 m). This threshold is reused as the early-termination test in slice 2.
+
+#### Rendering
+
+`fitCamera(w, h)` frames ~1.8 m of height and ~4 m of width:
+
+```
+scale = min(h / 1.8, w / 4)              px per metre
+ax    = w * 0.5                          canvas x of world x = 0
+ay    = h - max(48, h * 0.14)            canvas y of world y = 0
+
+screenX = ax + (worldX - cx) * scale
+screenY = ay - (worldY - cy) * scale     the y flip, in one place only
+```
+
+Bodies draw back to front: `far`, then `body`, then `near`. Canvas rotation is `-angle`,
+because a positive world rotation is anticlockwise but canvas y points down.
+
+### Files
+
+```
+package.json  tsconfig.base.json  tsconfig.json  .gitignore  CLAUDE.md
+packages/evolution/{package.json, src/{index,rng,morphology}.ts}
+packages/sim/{package.json, src/{index,world}.ts}
+apps/web/{package.json, vite.config.ts, index.html, src/main.ts, src/render/{camera,draw}.ts}
+scripts/headless.ts
+docs/technical-design.html
+```
+
+### Implementation notes
+
+**Rapier needs async init.** `await RAPIER.init()` exactly once per process before any
+other call. `initPhysics()` guards this with a module-level flag. Constructing a `Sim`
+before init throws with a clear message rather than a WASM fault.
+
+**Rapier allocates in WASM memory.** `World.free()` is not optional — `Sim.dispose()` must
+be called before dropping a sim, or a long session leaks. This matters enormously from
+slice 2, where thousands of sims are created.
+
+**Node strips types, it does not compile them.** `npm run sim` uses
+`node --experimental-strip-types`, which erases type annotations and rejects any syntax
+that *emits* code. In practice: no parameter properties (`constructor(private x: number)`),
+no `enum`, no namespaces, no decorators. This was hit immediately on `Rng`. Every file must
+stay strip-compatible; that is what keeps tests and scripts free of a build step.
+
+**`allowImportingTsExtensions`** must be on, because imports are written with explicit
+`.ts` extensions so that Node, Vite and `tsc` all resolve them identically.
+
+**Packages are consumed as source.** Vite aliases `@evolab/evolution` and `@evolab/sim` to
+their `src/index.ts`. There is no package build step and there should not be one — it buys
+nothing and costs a watch process.
+
+**The renderer's one lie.** `FAR_LEG_RENDER_OFFSET = 0.055 m` nudges the far leg sideways
+when drawing, because otherwise the two legs overlap exactly at rest and the biped looks
+like a pogo stick. Physics, fitness and trajectories all use true positions. Zero it when
+checking a screen position against a world coordinate. `JointAnchor.layer` exists purely to
+let joint markers follow the same offset.
+
+### Done when
+
+- [x] `npm run dev` shows a biped that stands, topples and settles.
+- [x] `npm run sim` prints the fall and reports `replay match yes`.
+- [x] `npm run check` is clean.
+- [x] `?seed=` and `?paused=1` work; `R` / `Space` / `.` work.
+
+**Observed:** seed 4417 falls after 0.39 s and settles with the torso at 0.1951 m; a replay
+of the same seed matches to within 1e-12. 720 steps for 3 s of simulated time.
+
+### Deliberately not in this slice
+
+No controller, no motors, no genetic algorithm, no UI beyond the HUD, no React, no workers,
+no 3D. Slice 0 proves the physics and the render loop and nothing else.
+
+---
+
+## Slice 1 — It walks, badly
+
+> **Status: next.** One session.
+
+### Goal
+
+Drive the joints with a hand-tuned periodic controller and a panel of sliders, so you
+discover first-hand how hard gait tuning is. It should lurch, and it should be frustrating.
+That frustration is the setup for slice 2.
+
+### Depends on
+
+Slice 0.
+
+### Design
+
+#### The controller
+
+A per-joint Fourier series over gait phase, truncated to one harmonic for now. This is the
+*parametric* encoding from §3 of the design document, and it stays the default controller
+for the whole project because every parameter maps to a visible feature of a curve.
+
+For joint *j* at time *t*:
+
+```
+phase   = 2π · f · t + φ_j
+target_j(t) = c_j + A_j · sin(phase)
+```
+
+with a per-side phase offset so the legs alternate: right-side joints add π to `φ`.
+
+| Parameter | Meaning | Range | Slider default |
+|---|---|---|---|
+| `f` | gait frequency, global | 0.5 … 3.0 Hz | 1.4 |
+| `A_j` | amplitude, per joint | 0 … 0.8 rad | hip 0.40, knee 0.50, ankle 0.20 |
+| `φ_j` | phase offset, per joint | 0 … 2π | hip 0, knee 2.2, ankle 3.6 |
+| `c_j` | centre angle, per joint | joint limits | hip 0.10, knee −0.35, ankle 0 |
+
+Six joints but left and right are mirrored, so there are **three** independent joint
+triples plus the global frequency: `3 × 3 + 1 = 10` numbers. Mirroring is a deliberate
+simplification — asymmetry is something evolution should discover, not something the
+slider panel should offer.
+
+Targets are clamped to the joint's limits before being applied.
+
+#### Driving the joints
+
+Rapier revolute joints have a built-in position motor. Per control tick, for each joint:
+
+```ts
+joint.configureMotorPosition(target, stiffness, damping);
+```
+
+Start with `stiffness = 12`, `damping = 1.2`, tuned per joint scale if the response is
+mushy or unstable. The motor is a PD controller in disguise: stiffness is P, damping is D.
+
+> **Verify at implementation time.** The exact accessor for a revolute impulse joint in
+> `@dimforge/rapier2d-compat` 0.14 needs checking against the installed typings —
+> `world.createImpulseJoint()` returns a base `ImpulseJoint`, and the motor methods live on
+> the revolute specialisation. Keep the returned handles in `Sim` when the joints are
+> created rather than looking them up later. If the motor API proves awkward, the fallback
+> is applying torques directly from a PD law:
+> `τ = clamp(k_p·(target − θ) − k_d·θ̇, −maxTorque, +maxTorque)`, using
+> `body.applyTorqueImpulse(τ · dt, true)` on the child and its negation on the parent.
+
+#### Control rate
+
+The controller runs at **60 Hz**, not at the physics rate — every 4th step at 1/240 s.
+Real actuators do not update at 240 Hz, and decoupling the two means the physics rate can
+change later without changing gait behaviour.
+
+```ts
+const CONTROL_EVERY = 4;
+if (stepCount % CONTROL_EVERY === 0) applyControl(t);
+sim.step();
+```
+
+#### API shape
+
+In `packages/evolution/controller.ts` — pure, no Rapier:
+
+```ts
+export interface GaitParams {
+  frequency: number;
+  joints: Record<'hip' | 'knee' | 'ankle', { amplitude: number; phase: number; centre: number }>;
+}
+
+/** Target angle for every joint at time t, keyed by joint id. */
+export function gaitTargets(params: GaitParams, t: number): Map<string, number>;
+
+export function defaultGait(): GaitParams;
+```
+
+In `packages/sim` — `Sim` gains:
+
+```ts
+setJointTargets(targets: Map<string, number>): void;
+```
+
+The sim applies targets to motors; it never computes them. That boundary is what lets
+slice 2 swap the controller without touching physics.
+
+### Files
+
+- `packages/evolution/src/controller.ts` — new
+- `packages/evolution/src/index.ts` — export the above
+- `packages/sim/src/world.ts` — keep joint handles, add `setJointTargets`
+- `apps/web/src/ui/sliders.ts` — new; a plain DOM slider panel, no framework
+- `apps/web/src/main.ts` — wire the control tick into the loop
+- `scripts/headless.ts` — drive the default gait for 8 s, print distance travelled
+
+### Implementation notes
+
+- **No React yet.** A slider panel is `<input type="range">` elements and an event
+  listener. React arrives when there are panels worth componentising, around slice 6.
+- **Show the numbers.** Each slider displays its value to 2 dp. Tuning blind is miserable.
+- **Add a distance readout to the HUD** — torso `x` displacement from spawn. It becomes
+  the primary fitness term in slice 2, so seeing it now builds the intuition.
+- **Persist slider state in the URL** (`?gait=...` as compact JSON, or individual params).
+  You will want to show someone a lurch you found, and you will want it back after a reload.
+- **Expect it to be bad.** A hand-tuned open-loop gait on a 6-DoF biped will travel maybe
+  1–3 m before falling. That is the correct outcome and the whole point of the slice.
+
+### Done when
+
+- Sliders visibly change the motion, in real time, without a respawn.
+- Some setting exists that moves the biped at least 1 m before it falls.
+- The HUD shows distance travelled and gait phase.
+- `npm run sim` drives the default gait and prints distance and time-to-fall.
+- Same seed plus same parameters still replays identically.
+
+### Deliberately not in this slice
+
+No genetic algorithm, no fitness function, no optimisation of any kind, no asymmetry
+between legs, no sensory feedback. The controller is strictly open-loop: it is a function
+of time and nothing else.
+
+---
+
+## Slice 2 — The GA finds a gait
+
+> **Status: planned.** Two sessions. The most important slice in the project.
+
+### Goal
+
+A genetic algorithm searches gait parameters and finds something that walks further than
+you managed by hand. Console output only — the visualisation is slice 3.
+
+### Depends on
+
+Slices 0 and 1.
+
+### Design
+
+#### Genome representation
+
+A `Float32Array` of length *n*, every gene in `[0, 1]`. Decoding maps each gene through a
+per-parameter range. Keeping the genome in unit space means every operator is
+encoding-agnostic — mutation and crossover never need to know what a gene means.
+
+For the mirrored parametric controller of slice 1: `n = 10`.
+See [Appendix B](#appendix-b--genome-layouts) for the exact layout.
+
+```ts
+export type Genome = Float32Array;
+export function decodeGait(genome: Genome): GaitParams;
+```
+
+#### Evaluation
+
+`packages/sim/src/evaluate.ts`:
+
+```ts
+export interface TrialResult {
+  distance: number;        // torso x displacement, metres
+  uprightTime: number;     // seconds before falling (or full trial length)
+  energy: number;          // Σ |τ · Δθ| over the trial, joules
+  fell: boolean;
+  duration: number;
+}
+
+export function evaluate(
+  morph: Morphology,
+  genome: Genome,
+  opts: { seed: number; seconds: number },
+): TrialResult;
+```
+
+Trial length **4 s** in slice 2 (2D, guided-scale runs — see §4 of the design document).
+Early-terminate the moment `fallen` becomes true; this saves roughly 40 % of the
+simulation budget because most early genomes fall almost immediately.
+
+`evaluate` must call `sim.dispose()` in a `finally`. Thousands of these run per generation.
+
+#### Fitness
+
+Keep it defensive from the first line. Naïve distance-only fitness reliably evolves a robot
+that dives forward and lands on its face — see §3 and §7 of the design document, where this
+is eventually staged as a deliberate lesson. For now, the defensive terms are on:
+
+```
+fitness = 1.0 · distance
+        + 0.5 · (uprightTime / duration)
+        − 0.3 · max(0, energy / 400 − 1)
+```
+
+Negative fitness is clamped to 0. Every term is logged separately so a collapse can be
+attributed to a cause.
+
+#### Operators
+
+All in `packages/evolution/src/operators.ts`, all taking an `Rng` explicitly.
+
+**Tournament selection**, size 3: draw 3 individuals uniformly at random, return the
+fittest. Repeat to fill the parent pool.
+
+**SBX crossover** (simulated binary, η = 15, applied per gene with probability 0.9). For
+parents `p1`, `p2` and `u ~ U(0,1)`:
+
+```
+β  = (2u)^(1/(η+1))                    if u ≤ 0.5
+β  = (1 / (2(1−u)))^(1/(η+1))          otherwise
+
+c1 = 0.5[(1+β)·p1 + (1−β)·p2]
+c2 = 0.5[(1−β)·p1 + (1+β)·p2]
+```
+
+Clamp children to `[0, 1]`. SBX blends rather than splices, which suits continuous control
+parameters far better than single-point crossover.
+
+**Polynomial mutation** (η = 20, per-gene rate `1/n`):
+
+```
+δ = (2u)^(1/(η+1)) − 1                 if u < 0.5
+δ = 1 − (2(1−u))^(1/(η+1))             otherwise
+
+x' = clamp(x + δ, 0, 1)
+```
+
+**Elitism:** the 2 fittest individuals pass to the next generation unchanged. This is not
+optional — without it the best gait can be lost to an unlucky draw, and the fitness curve
+develops dips that look like bugs.
+
+#### The island
+
+```ts
+export interface Individual { genes: Genome; fitness: number; result: TrialResult | null; }
+
+export interface Island {
+  readonly id: number;
+  readonly rng: Rng;
+  generation: number;
+  population: Individual[];
+}
+
+export function createIsland(size: number, genomeLength: number, seed: number): Island;
+
+export function stepGeneration(
+  island: Island,
+  evaluateFn: (g: Genome, seed: number) => TrialResult,
+): GenerationSummary;
+```
+
+Note that `stepGeneration` takes the evaluator as a **parameter**. That is ground rule 3 in
+action: `packages/evolution` never imports `packages/sim`, so the whole GA is testable with
+a fake evaluator that returns arithmetic.
+
+```ts
+export interface GenerationSummary {
+  generation: number;
+  best: number;
+  mean: number;
+  worst: number;
+  diversity: number;    // mean pairwise Euclidean distance in genome space
+  bestGenome: Genome;
+}
+```
+
+**Defaults:** population 24, generations 30, tournament 3, elites 2, crossover 0.9,
+mutation `1/n`, one evaluation seed per individual.
+
+#### The golden test
+
+The highest-value test in the project. Create it in this slice, and never weaken it.
+
+```ts
+// packages/evolution/__tests__/golden.test.ts
+test('seed 4417 evolves a known fitness sequence', () => {
+  const island = createIsland(24, 10, 4417);
+  const seq: number[] = [];
+  for (let g = 0; g < 20; g++) seq.push(stepGeneration(island, fakeEvaluate).best);
+  expect(seq).toEqual(GOLDEN);   // 20 exact numbers, committed
+});
+```
+
+Use a **deterministic synthetic evaluator** here — a closed-form function of the genome,
+not the physics. That keeps the test at millisecond speed and isolates GA regressions from
+physics changes. A second, slower test can pin one real physics trial.
+
+If this test fails: either the change is a bug, or the change is deliberate and the golden
+values are regenerated *in the same commit*, with the reason in the message.
+
+### Files
+
+- `packages/evolution/src/{operators,island,fitness}.ts` — new
+- `packages/evolution/src/controller.ts` — add `decodeGait`
+- `packages/evolution/__tests__/golden.test.ts` — new
+- `packages/sim/src/evaluate.ts` — new
+- `scripts/evolve.ts` — new; run a search from the CLI and print progress
+- `package.json` — add `vitest`, add `"test": "vitest run"`
+
+### Implementation notes
+
+- **Add Vitest in this slice**, not earlier. It is the first slice with logic worth testing
+  in isolation. Configure the same path aliases as Vite.
+- **Dispose every sim.** The single most likely cause of a mysteriously slow or crashing
+  run is leaked Rapier worlds.
+- **Log per-generation to the console** as a fixed-width table: generation, best, mean,
+  diversity. You will read hundreds of these.
+- **Watch diversity, not just fitness.** Collapsing diversity with flat fitness means
+  premature convergence — the population has agreed on a mediocre answer. It is also the
+  concept that slice 11 teaches, so getting the metric right now pays twice.
+- **Expect roughly 40 ms per generation** for 24 individuals × 4 s trials on one core
+  (see §4 of the design document), so 30 generations is about 1.4 s. If it is dramatically
+  slower, suspect undisposed worlds or a missing early-termination.
+
+### Done when
+
+- `npm run evolve` finds a gait travelling further than the best hand-tuned slider setting
+  from slice 1.
+- The golden test passes and is committed with its expected values.
+- Diversity is reported and visibly falls over a run.
+- Re-running with the same seed produces byte-identical output.
+- Elitism demonstrably works: best fitness is monotonically non-decreasing.
+
+### Deliberately not in this slice
+
+No charts, no UI, no workers, no MAP-Elites, no multi-objective, no CPG. Console output
+only. Resist making it pretty — that is the next slice, and it is much more satisfying when
+the algorithm underneath already works.
+
+---
+
+## Slice 3 — You can watch it
+
+> **Status: planned.** Two sessions. **This is the payoff.**
+
+### Goal
+
+A fitness chart climbing in real time next to a live replay of the current champion. The
+moment the project becomes interesting to look at.
+
+### Depends on
+
+Slices 0–2.
+
+### Design
+
+#### Layout
+
+Three regions, matching the eventual chassis in §8 of the design document so nothing has to
+be relearned later:
+
+```
+┌──────────────────────────────────────────────┐
+│ toolbar: run / pause / reset · gen 18 / 30   │
+├───────────────┬──────────────────────────────┤
+│ stage         │ fitness chart                │
+│ (champion     ├──────────────────────────────┤
+│  replay)      │ run stats                    │
+└───────────────┴──────────────────────────────┘
+```
+
+#### Driving evolution from the UI thread
+
+Evolution still runs on the main thread in this slice — workers are slice 4. To keep the
+page responsive, run **one generation per animation frame** rather than a blocking loop:
+
+```ts
+function frame() {
+  if (running && island.generation < target) {
+    const summary = stepGeneration(island, evaluateWithPhysics);
+    history.push(summary);
+    if (summary.best > championFitness) setChampion(summary.bestGenome);
+  }
+  drawChampionReplay();
+  drawChart(history);
+  requestAnimationFrame(frame);
+}
+```
+
+At ~40 ms per generation this yields roughly 25 generations per second — fast enough that a
+30-generation run finishes in about a second, which is exactly the interactivity §4 of the
+design document argues for.
+
+#### Champion replay
+
+A separate long-lived `Sim`, independent of evaluation, stepping at real-time rate and
+looping. When a new champion appears, dispose and respawn it with the new genome. The
+replay is for looking at; it never contributes to fitness.
+
+#### The chart
+
+Hand-rolled canvas, not a charting library. It draws three series over generation index:
+best (amber, 2 px), mean (cyan, 1.4 px), and an inter-quartile band (cyan at 14 % alpha).
+
+Keep it in `render/chart.ts` with a signature that takes a plain array of summaries and a
+rect. uPlot arrives only if hand-rolled becomes a burden, which for a few hundred points
+it will not.
+
+#### State
+
+A single plain object, no state library:
+
+```ts
+interface RunState {
+  island: Island;
+  history: GenerationSummary[];
+  champion: { genes: Genome; fitness: number } | null;
+  running: boolean;
+  target: number;
+}
+```
+
+Zustand arrives when there are multiple panels sharing state, around slice 6.
+
+### Files
+
+- `apps/web/src/run/state.ts`, `apps/web/src/run/loop.ts` — new
+- `apps/web/src/render/chart.ts` — new
+- `apps/web/src/main.ts` — restructure around the run loop
+- `apps/web/index.html` — the three-region layout
+
+### Implementation notes
+
+- **Keep the slice-1 slider panel**, switchable between *manual* and *evolved*. Being able
+  to flip between your hand-tuned gait and the evolved one, on the same screen, is the most
+  persuasive thing in the app.
+- **Do not block the frame.** If one generation ever exceeds ~16 ms the page stutters; that
+  is the signal to bring slice 4 forward.
+- **Show the generation counter and elapsed time.** Honest progress beats a spinner.
+
+### Done when
+
+- Pressing *run* fills a fitness chart in a couple of seconds, live.
+- The champion replay updates when the champion improves.
+- Manual and evolved gaits can be compared side by side.
+- The page stays at 60 fps throughout.
+
+### Deliberately not in this slice
+
+No workers, no archive, no islands plural, no 3D, no persistence. One population, one
+thread, one chart.
+
+---
+
+## Slice 4 — Off the main thread
+
+> **Status: planned.** Two sessions.
+
+### Goal
+
+Evaluation moves into Web Workers, one island per worker, so throughput scales with cores
+and the UI never stutters.
+
+### Depends on
+
+Slices 0–3.
+
+### Design
+
+#### Topology
+
+`N = min(hardwareConcurrency − 1, 8)` workers, each owning one island. Islands evolve
+independently and exchange 2 elites with ring neighbours every 5 generations. No
+per-generation synchronisation barrier — a worker never waits for the slowest trial in
+another island.
+
+#### Protocol
+
+Raw `postMessage` with a discriminated union. No Comlink: the protocol is small enough that
+a dependency would cost more than it saves.
+
+```ts
+// main -> worker
+type ToWorker =
+  | { type: 'init'; islandId: number; morphology: Morphology; seed: number; config: GaConfig }
+  | { type: 'run'; generations: number }
+  | { type: 'pause' }
+  | { type: 'immigrate'; genomes: Float32Array }   // transferable
+  ;
+
+// worker -> main
+type FromWorker =
+  | { type: 'generation'; islandId: number; summary: GenerationSummary }
+  | { type: 'emigrants'; islandId: number; genomes: Float32Array }
+  | { type: 'error'; islandId: number; message: string }
+  ;
+```
+
+Genome payloads are `Float32Array` and are **transferred**, not copied:
+
+```ts
+worker.postMessage(msg, [genomes.buffer]);
+```
+
+Note that a transferred buffer is detached on the sender's side. Copy before sending if the
+sender still needs it — this is a classic source of confusing empty-array bugs.
+
+#### Migration
+
+The main thread is the postman, not the scheduler. When a worker reports emigrants, the
+main thread forwards them to `(islandId + 1) % N`. Migration is asynchronous and a lost or
+late migrant degrades search quality slightly rather than corrupting anything — which is
+exactly why the island model was chosen (§2 of the design document).
+
+#### Worker module
+
+```ts
+// apps/web/src/workers/island.worker.ts
+import { createIsland, stepGeneration } from '@evolab/evolution';
+import { initPhysics, makeEvaluator } from '@evolab/sim';
+```
+
+Vite handles worker bundling via `new Worker(new URL('./island.worker.ts', import.meta.url), { type: 'module' })`.
+Each worker calls `await initPhysics()` before its first evaluation — Rapier's WASM is
+per-worker, since WASM memory is not shared.
+
+### Files
+
+- `apps/web/src/workers/island.worker.ts`, `apps/web/src/workers/pool.ts` — new
+- `apps/web/src/run/loop.ts` — drive the pool instead of a local island
+- `packages/sim/src/evaluate.ts` — factor out `makeEvaluator(morph, opts)`
+
+### Implementation notes
+
+- **Per-worker WASM init is the main start-up cost.** Roughly 40 ms each; initialise all
+  workers in parallel at app start, not on first run.
+- **Aggregate the chart across islands.** Best-of-all-islands is the amber line; mean of
+  means is the cyan one. Per-island sparklines arrive with the full Evolution Lab.
+- **Cap workers on touch devices** at 4, per §10 of the design document.
+- **Determinism is now per island.** Each island has its own seeded stream, so a run is
+  reproducible given the same island count. Changing `N` changes results — record `N` in
+  the run config, and keep the golden test single-island.
+
+### Done when
+
+- Throughput scales roughly linearly with worker count.
+- The UI holds 60 fps during a full run.
+- Migration is observable: an island's best fitness jumps after receiving a good migrant.
+- Same seed *and* same worker count reproduces exactly.
+
+### Deliberately not in this slice
+
+No cloud, no server, no SharedArrayBuffer, no cross-tab anything. The hybrid ring described
+in the design document is cut — see §2 of that document for why.
+
+---
+
+## Slice 5 — The stepper
+
+> **Status: planned.** Three sessions.
+
+### Goal
+
+Pause the algorithm between operators and show each one acting on real genomes: population,
+evaluate, select, crossover, mutate, replace. The teaching screen — Fig 9.4 of the design
+document.
+
+### Depends on
+
+Slices 0–3. Works against a single island, so it does not need slice 4.
+
+### Design
+
+#### The key structural idea
+
+Rewrite `stepGeneration` as a **generator** that yields at each operator boundary. The
+stepper then comes almost free, and — crucially — it drives the same code path as a normal
+run rather than a parallel implementation of it.
+
+```ts
+export type Stage =
+  | { stage: 'population'; individuals: Individual[] }
+  | { stage: 'evaluate'; results: TrialResult[] }
+  | { stage: 'select'; tournaments: { drawn: number[]; winner: number }[] }
+  | { stage: 'crossover'; pairs: { a: Genome; b: Genome; child: Genome; cut: [number, number] }[] }
+  | { stage: 'mutate'; mutations: { index: number; gene: number; from: number; to: number }[] }
+  | { stage: 'replace'; summary: GenerationSummary };
+
+export function* generation(island: Island, evaluateFn: Evaluator): Generator<Stage, GenerationSummary>;
+```
+
+Normal running becomes `for (const _ of generation(island, ev)) {}` — drain it. The stepper
+advances it one `next()` at a time. One implementation, two speeds.
+
+#### Rendering genomes
+
+Gene strips: a genome drawn as *n* coloured cells. Provenance colours during crossover
+(parent A violet, parent B cyan), mutated cells amber with a ring. Canvas, not DOM nodes.
+
+### Files
+
+- `packages/evolution/src/island.ts` — convert to a generator
+- `apps/web/src/ui/stepper.ts`, `apps/web/src/render/genes.ts` — new
+
+### Implementation notes
+
+- Converting to a generator is a **behaviour-preserving refactor**. The golden test must
+  pass before and after, unchanged. If it does not, the conversion changed the order of RNG
+  draws — which is exactly the kind of bug the golden test exists to catch.
+- Explanations are data keyed by stage id, not strings in the view (§7 of the design
+  document).
+
+### Done when
+
+Stepping forward through one generation shows every operator acting on real values, the
+golden test is untouched, and running normally still produces identical results.
+
+---
+
+## Slice 6 — Guided first run
+
+> **Status: planned.** Two sessions.
+
+### Goal
+
+The onboarding flow of Fig 9.1: one decision at a time, preset goals, plain-language notes,
+generation 1 shown falling over.
+
+### Depends on
+
+Slices 0–3, and slice 5 for the "show me how this works" entry point.
+
+### Design
+
+Introduce React here, and not before — this is the first slice with enough panel structure
+to justify it. Port the existing canvas surfaces as components wrapping a ref; the render
+functions themselves do not change.
+
+Stage state (`guided` / `explorer` / `lab`) becomes app state, freely switchable from the
+toolbar, with nothing locked (§7 of the design document). Four preset objectives, each a
+named weight vector over the fitness terms already implemented in slice 2.
+
+### Done when
+
+A first-time user reaches an evolved gait without touching a slider, and can switch to the
+full interface in one click.
+
+---
+
+## Slice 7 — Body editor
+
+> **Status: planned.** Three sessions.
+
+### Goal
+
+The morphology designer of Fig 9.3: edit segments and joints in a 2D sagittal view, with
+live mass and torque readouts.
+
+### Design sketch
+
+`Morphology` becomes user data rather than a constant — persisted to IndexedDB, versioned,
+and **immutable once a run references it** (§11 of the design document). Editing a
+referenced morphology forks a revision.
+
+Direct manipulation on the existing canvas: drag a joint to move it, drag a segment edge to
+resize. Symmetry lock mirrors edits across the sagittal plane by default. Validation runs
+on every edit: closed kinematic chain, non-degenerate limits, mass within bounds.
+
+Note that changing the morphology changes the genome length whenever the joint count
+changes — genomes are not portable across morphologies, and the UI must say so rather than
+silently producing nonsense.
+
+---
+
+## Slice 8 — Behaviour archive
+
+> **Status: planned.** Two sessions.
+
+### Goal
+
+MAP-Elites running alongside the GA: a 24 × 24 grid keyed by behaviour, each cell holding
+the fittest genome exhibiting that behaviour.
+
+### Design sketch
+
+Descriptors: **stride length** (0.15–0.95 m) on one axis, **duty factor** (0.35–0.85) on
+the other. Both are computed from foot-contact events during evaluation, so `TrialResult`
+gains `strideLength` and `dutyFactor`.
+
+```ts
+export function archiveInsert(
+  archive: Archive, genome: Genome, behaviour: [number, number], fitness: number
+): boolean;    // true if it claimed or improved a cell
+```
+
+One map insert per evaluation. Render as a single `ImageData` blit rather than 576 DOM
+nodes.
+
+This is the slice that makes the search legible: coverage is an honest measure where a
+maximum is a single lucky cell. It is also a natural stopping point for the project.
+
+---
+
+## Slices 9–14 — Later stages
+
+Sketches only. Each will be written out fully at the end of the slice before it.
+
+| # | Name | Shape of the work |
+|---|---|---|
+| 9 | **3D replay** | Three.js scene, instanced ghosts, orbit camera, timeline scrubber. Physics moves to `rapier3d`; the morphology gains a third dimension and roll joints. The 2D mode stays — it remains the teaching surface. |
+| 10 | **Gait analysis** | Footfall diagram from contact events, joint-angle traces, hip phase portrait. All share one scrubber with the replay. Recording is already a flag on `evaluate`. |
+| 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. |
+| 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. |
+| 13 | **Community archive** | Publish elites; merged grid across all published runs. Reuses the archive merge that already exists as island migration. |
+| 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |
+
+---
+
+## Appendix A — Rapier notes
+
+Accumulated API facts. Add to this whenever something surprises you.
+
+**Initialisation.** `await RAPIER.init()` once per *context* — main thread and every worker
+separately. WASM memory is not shared across workers.
+
+**Memory.** `World.free()` is mandatory. Rapier objects live in WASM linear memory and are
+not garbage collected. Anything that creates a world in a loop must dispose it in a
+`finally`.
+
+**Cuboids take half-extents.** `ColliderDesc.cuboid(hx, hy)` describes a box `2hx × 2hy`.
+
+**Collision groups** pack membership into the high 16 bits and the filter mask into the low
+16: `(membership << 16) | filter`. Two colliders interact only if each one's membership
+intersects the other's filter.
+
+**Joint anchors are in local frames.** A revolute joint is created with
+`RAPIER.JointData.revolute(anchorInParent, anchorInChild)`; both anchors describe the same
+world point when the bodies are in their rest pose.
+
+**Limits** are set on the `JointData` before creation: `params.limitsEnabled = true;
+params.limits = [min, max]` in radians.
+
+**Rotation in 2D is a scalar** — `body.rotation()` returns radians, not a quaternion. In 3D
+it returns a quaternion, which slice 9 will have to account for.
+
+**`-compat` builds** inline the WASM as base64. Larger download, but no separate `.wasm`
+asset to configure in the bundler and no worker-loading edge cases. Worth revisiting only
+if bundle size ever matters.
+
+---
+
+## Appendix B — Genome layouts
+
+### Parametric, mirrored (slices 2–6)
+
+`n = 10`. Genes are in `[0, 1]` and decode linearly into these ranges.
+
+| Index | Parameter | Range |
+|---|---|---|
+| 0 | gait frequency | 0.5 … 3.0 Hz |
+| 1 | hip amplitude | 0 … 0.8 rad |
+| 2 | hip phase | 0 … 2π |
+| 3 | hip centre | −0.5 … 0.5 rad |
+| 4 | knee amplitude | 0 … 0.9 rad |
+| 5 | knee phase | 0 … 2π |
+| 6 | knee centre | −0.8 … 0.1 rad |
+| 7 | ankle amplitude | 0 … 0.5 rad |
+| 8 | ankle phase | 0 … 2π |
+| 9 | ankle centre | −0.4 … 0.4 rad |
+
+Left and right joints share parameters; the right side adds π to phase.
+
+### Parametric, independent (slice 7+)
+
+Once the body is user-editable, genome length is computed from the morphology rather than
+fixed:
+
+```
+n = 1 + 3 · J          mirrored   (one triple per distinct joint type)
+n = 1 + 3 · J_total    independent (one triple per actuated joint)
+```
+
+For the default biped, `J = 3` distinct types and `J_total = 6`, giving `n = 10` mirrored
+or `n = 19` independent. Mirroring becomes a per-run option rather than a constant, because
+an asymmetric gait is something worth discovering rather than ruling out. Genome length
+depends on joint count, so genomes do not transfer between morphologies — the UI must say
+so rather than silently producing nonsense.
+
+### Later encodings
+
+CPG (`9J + 4`) and neural (`~1.4k`) are specified in §3 of the design document. Neither is
+in the v1 build; the parametric encoding is the default throughout because every gene maps
+to a visible feature of a curve, which is what makes the stepper worth looking at.
