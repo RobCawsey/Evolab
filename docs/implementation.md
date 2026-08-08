@@ -129,11 +129,38 @@ World space is y-up; canvas is y-down; the flip lives in `render/camera.ts` alon
 
 ### Definition of done, for every slice
 
+- `npm test` passes.
 - `npm run check` passes with no errors.
 - `npm run sim` passes, including its determinism assertion.
 - The app runs. No slice ends with a broken tree.
 - One commit, whose message states the observable result (a time, a distance, a fitness).
 - This document updated per [Maintaining it](#maintaining-it).
+
+### On tests
+
+Vitest was originally deferred to slice 2, on the reasoning that slice 1 had no logic worth
+testing in isolation. That was wrong. Slice 1 shipped two silent bugs — a mass unit error
+and joint limits that were never applied — both of which a five-line assertion would have
+caught immediately, and neither of which the smoke test noticed because the robot fell over
+either way.
+
+The suite now runs in about 1.5 s, which is fast enough to run on every change. Its shape:
+
+| File | Covers |
+|---|---|
+| `packages/evolution/__tests__/rng.test.ts` | Pinned golden vector, replay, distribution, bounds |
+| `packages/evolution/__tests__/morphology.test.ts` | Mass, kinematic chain closure, limits, centre of mass |
+| `packages/evolution/__tests__/controller.test.ts` | Clamping, periodicity, leg phasing, feedback term |
+| `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
+
+Two habits worth keeping:
+
+- **Write the test that would have caught the bug**, not a test near it. The mass assertion
+  is three lines and is the entire defence against a units error that made every torque
+  figure in the project meaningless.
+- **Verify a regression guard by reintroducing its bug.** All three guards above were
+  checked that way — revert the fix, watch the test fail, restore it. A regression test
+  that has never been seen to fail is a guess.
 
 ---
 
@@ -772,8 +799,8 @@ values are regenerated *in the same commit*, with the reason in the message.
 
 ### Implementation notes
 
-- **Add Vitest in this slice**, not earlier. It is the first slice with logic worth testing
-  in isolation. Configure the same path aliases as Vite.
+- **Vitest is already installed and configured** — it arrived in slice 1, one slice later
+  than it should have. Add the golden test to the existing suite; no setup needed.
 - **Dispose every sim.** The single most likely cause of a mysteriously slow or crashing
   run is leaked Rapier worlds.
 - **Log per-generation to the console** as a fixed-width table: generation, best, mean,

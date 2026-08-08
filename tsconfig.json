@@ -2,12 +2,18 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
-    "noEmit": true
+    "noEmit": true,
+    "types": [
+      "node",
+      "vitest/globals"
+    ]
   },
   "include": [
     "packages/*/src/**/*.ts",
+    "packages/*/__tests__/**/*.ts",
     "apps/web/src/**/*.ts",
     "apps/web/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "*.config.ts"
   ]
 }

@@ -52,9 +52,15 @@ the app still works.
    steps it, and returns numbers. It does not render, and it does not know what a genome is.
 5. **Nothing browser-specific below `apps/web`.** Workers, canvas, React, storage — all
    live in the app, never in a package.
-6. **The golden test is never deleted or loosened to make a change pass.** (Arrives in
-   slice 2, with the GA.) If it fails, either the change is wrong or the change is
-   deliberate — say which, in the commit message.
+6. **Tests are never deleted or loosened to make a change pass.** If one fails, either the
+   change is wrong or the change is deliberate — say which, in the commit message, and
+   update the expected values in the same commit.
+
+   Three of them are regression guards for bugs that actually shipped, and each has been
+   verified to fail when its bug is reintroduced: `weighs about 21 kg` (density is per
+   *area* in 2D), `joint limits are actually enforced` (`setLimits` on the joint, not on
+   the `JointData`), and the `motor authority` block (gains 200× too low). Do not relax
+   these; they are the cheapest insurance in the project.
 
 ## Layout
 
@@ -73,9 +79,15 @@ There is no build step for packages and there should not be one.
 ```bash
 npm install          # once, from the repo root
 npm run dev          # http://localhost:5173
+npm test             # unit tests — run these before every commit
 npm run check        # typecheck everything
 npm run sim          # headless: step the biped in Node, print positions
 ```
+
+`npm test` is 53 tests in about 1.5 s, so there is no excuse for not running it. It covers
+the RNG (including a pinned golden vector), the controller, the morphology, and the
+physics — the last of these builds real Rapier worlds and is still fast enough to sit in
+the inner loop.
 
 `npm run sim` exists because invariants 3 and 4 make it possible, and because verifying
 physics without a browser is much faster than verifying it with one. It also asserts that
