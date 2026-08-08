@@ -1,0 +1,159 @@
+/**
+ * The gait slider panel. Plain DOM — React arrives at slice 6, when there are panels
+ * worth componentising.
+ *
+ * Every slider is derived from GAIT_RANGES, so the space you can explore by hand is
+ * exactly the space the genetic algorithm will search in slice 2. That equivalence is
+ * the point of the exercise: you are about to lose a race against it, fairly.
+ */
+
+import {
+  GAIT_RANGES,
+  JOINT_KINDS,
+  withJointParam,
+  type GaitParams,
+  type JointGait,
+  type JointKind,
+} from '@evolab/evolution';
+
+const KEYS: readonly (keyof JointGait)[] = ['amplitude', 'phase', 'centre'];
+const LABEL: Record<keyof JointGait, string> = {
+  amplitude: 'amplitude',
+  phase: 'phase',
+  centre: 'centre',
+};
+
+export interface SliderPanel {
+  /** Push external changes (a URL load, a reset) back into the inputs. */
+  sync(params: GaitParams): void;
+}
+
+export function createSliders(
+  host: HTMLElement,
+  initial: GaitParams,
+  onChange: (next: GaitParams) => void,
+): SliderPanel {
+  let current = initial;
+  const inputs: { el: HTMLInputElement; out: HTMLElement; read: (p: GaitParams) => number }[] = [];
+
+  function row(
+    label: string,
+    min: number,
+    max: number,
+    read: (p: GaitParams) => number,
+    write: (p: GaitParams, v: number) => GaitParams,
+    unit = '',
+  ): HTMLElement {
+    const wrap = document.createElement('label');
+    wrap.className = 'sl';
+
+    const name = document.createElement('span');
+    name.className = 'sl-name';
+    name.textContent = label;
+
+    const el = document.createElement('input');
+    el.type = 'range';
+    el.min = String(min);
+    el.max = String(max);
+    el.step = String((max - min) / 400);
+    el.value = String(read(current));
+
+    const out = document.createElement('b');
+    out.className = 'sl-val';
+    out.textContent = read(current).toFixed(2) + unit;
+
+    el.addEventListener('input', () => {
+      const v = Number(el.value);
+      out.textContent = v.toFixed(2) + unit;
+      current = write(current, v);
+      onChange(current);
+    });
+
+    wrap.append(name, el, out);
+    inputs.push({ el, out, read });
+    return wrap;
+  }
+
+  const frag = document.createDocumentFragment();
+
+  const freq = document.createElement('div');
+  freq.className = 'sl-group';
+  freq.append(
+    heading('gait'),
+    row(
+      'frequency',
+      GAIT_RANGES.frequency[0],
+      GAIT_RANGES.frequency[1],
+      (p) => p.frequency,
+      (p, v) => ({ ...p, frequency: v }),
+      ' Hz',
+    ),
+  );
+  frag.append(freq);
+
+  for (const kind of JOINT_KINDS) {
+    const group = document.createElement('div');
+    group.className = 'sl-group';
+    group.append(heading(kind));
+    for (const key of KEYS) {
+      const [min, max] = GAIT_RANGES[kind][key];
+      group.append(
+        row(
+          LABEL[key],
+          min,
+          max,
+          (p) => p[kind][key],
+          (p, v) => withJointParam(p, kind as JointKind, key, v),
+        ),
+      );
+    }
+    frag.append(group);
+  }
+
+  host.append(frag);
+
+  return {
+    sync(params: GaitParams): void {
+      current = params;
+      for (const i of inputs) {
+        const v = i.read(params);
+        i.el.value = String(v);
+        i.out.textContent = v.toFixed(2) + (i.out.textContent?.endsWith('Hz') ? ' Hz' : '');
+      }
+    },
+  };
+}
+
+function heading(text: string): HTMLElement {
+  const h = document.createElement('div');
+  h.className = 'sl-head';
+  h.textContent = text;
+  return h;
+}
+
+/* ---------------- URL persistence ---------------- */
+
+/**
+ * Gaits are worth sharing and worth surviving a reload, and ten numbers fit comfortably
+ * in a query string. Order matches the genome layout in slice 2, deliberately.
+ */
+export function encodeGait(p: GaitParams): string {
+  const n = [
+    p.frequency,
+    p.hip.amplitude, p.hip.phase, p.hip.centre,
+    p.knee.amplitude, p.knee.phase, p.knee.centre,
+    p.ankle.amplitude, p.ankle.phase, p.ankle.centre,
+  ];
+  return n.map((v) => v.toFixed(3)).join(',');
+}
+
+export function decodeGait(text: string, fallback: GaitParams): GaitParams {
+  const n = text.split(',').map(Number);
+  if (n.length !== 10 || n.some((v) => !Number.isFinite(v))) return fallback;
+  return {
+    frequency: n[0]!,
+    hip: { amplitude: n[1]!, phase: n[2]!, centre: n[3]! },
+    knee: { amplitude: n[4]!, phase: n[5]!, centre: n[6]! },
+    ankle: { amplitude: n[7]!, phase: n[8]!, centre: n[9]! },
+  };
+}

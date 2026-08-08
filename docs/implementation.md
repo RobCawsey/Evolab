@@ -20,7 +20,8 @@ first.
 - [Module map](#module-map)
 - [Slice index](#slice-index)
 - **Slice 0** — [It falls over](#slice-0--it-falls-over) *(complete)*
-- **Slice 1** — [It walks, badly](#slice-1--it-walks-badly)
+- **Slice 1** — [It walks, badly](#slice-1--it-walks-badly) *(complete — read
+  [the open-loop ceiling](#the-open-loop-ceiling))*
 - **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait)
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it)
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
@@ -180,8 +181,8 @@ apps/web  ->  packages/evolution
 | # | Name | Sessions | Status |
 |---|---|---|---|
 | 0 | [It falls over](#slice-0--it-falls-over) | 1 | **complete** |
-| 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | next |
-| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | planned |
+| 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | **complete** |
+| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | blocked — see slice 1 |
 | 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | planned |
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | planned |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
@@ -351,7 +352,9 @@ no 3D. Slice 0 proves the physics and the render loop and nothing else.
 
 ## Slice 1 — It walks, badly
 
-> **Status: next.** One session.
+> **Status: complete**, with a finding that blocks slice 2. See
+> [The open-loop ceiling](#the-open-loop-ceiling) below — it needs a decision before the
+> genetic algorithm is worth building.
 
 ### Goal
 
@@ -474,23 +477,104 @@ slice 2 swap the controller without touching physics.
 
 ### Done when
 
-- Sliders visibly change the motion, in real time, without a respawn.
-- Some setting exists that moves the biped at least 1 m before it falls.
-- The HUD shows distance travelled and gait phase.
-- `npm run sim` drives the default gait and prints distance and time-to-fall.
-- Same seed plus same parameters still replays identically.
+- [x] Sliders visibly change the motion, in real time, without a respawn.
+- [x] The HUD shows distance travelled and gait phase.
+- [x] `npm run sim` drives the default gait and prints distance and time-to-fall.
+- [x] Same seed plus same parameters still replays identically.
+- [~] *Some setting exists that moves the biped at least 1 m before it falls* — best found
+  is **0.95 m**, from a 120-generation population search over the same parameter space.
+  Not met, and not reachable. See below.
+
+**Observed:** the default gait travels −0.19 m and falls at 0.62 s. The best known gait
+travels 0.95 m and falls at 1.30 s. Both replay exactly.
+
+### Two bugs found in slice 0
+
+Both were silent, and both invalidated numbers already written down.
+
+**Density is mass per unit area, not volume.** Rapier's 2D world computes
+`mass = density × area` — the simulation is a slice through a body of unit depth. Slice 0
+used `density: 1000`, which built a **163 kg** biped, not the ≈21 kg claimed. Fixed by
+introducing `DENSITY = 130 kg/m²` (1000 kg/m³ × 0.13 m of limb depth), giving 21.1 kg.
+Motors hid the error because they are acceleration-based and therefore mass-independent,
+but every `maxTorque` figure was meaningless.
+
+**Joint limits set on `JointData` are silently ignored.** Setting
+`params.limitsEnabled = true; params.limits = [min, max]` before
+`world.createImpulseJoint()` has no effect for 2D revolute joints in Rapier 0.14 — the
+joint comes back with `limitsEnabled() === false` and bounds of ±3.4e38. Limits must be
+applied to the created joint with `handle.setLimits(min, max)`. Slice 0 did it the first
+way, so the biped had no joint limits at all and its knees bent both directions.
+
+### The open-loop ceiling
+
+The biped cannot stay upright for more than about two seconds, whatever the gait
+parameters. This is not a tuning problem and not a bug; it is a property of the controller
+class. It caps everything downstream, so it needs a decision before slice 2.
+
+**Evidence, in the order it was gathered:**
+
+| Test | Result |
+|---|---|
+| Single box resting on the ground | stable indefinitely |
+| Tall 0.92 m box on a 0.16 m base (rigid, pendulum-shaped) | **stable indefinitely** |
+| Two bodies joined by one locked revolute motor, `k` = 6000 | **falls to 90°** |
+| Full biped, all joints locked at 0, `k` = 6000, 32 solver iterations | falls at ≈1.9 s |
+| 2000 random gaits, scored on distance | p50 = 0.00 m, p99 = 0.05 m, max 0.69 m |
+| 120-generation population search, shaped fitness | plateaus at 0.73 m / 1.9 s upright |
+
+The third row is the explanation. **A position motor is a spring, not a rigid link.** Under
+a sustained gravitational moment it deflects; the deflection moves the centre of mass
+further off the support; that increases the moment. Positive feedback, and it collapses.
+Raising stiffness delays it and does not prevent it. Solver iterations make no difference.
+
+The second row rules out geometry: the same shape, rigid, stands forever on the same feet.
+The centre of mass sits at x = 0.003 m with 53 mm of margin to the heel edge and 107 mm to
+the toe. The morphology is fine. What is missing is that **nothing in the system references
+the world frame** — joint motors control relative angles only, so no combination of them
+can know the robot is tipping, let alone correct it.
+
+This is the textbook result that an inverted pendulum cannot be balanced open-loop. §3 of
+the design document already says the parametric controller "cannot react"; what was not
+anticipated is that it cannot stand either.
+
+**Do not fix this by changing the morphology.** Bigger feet or a lower torso would buy a
+few hundred milliseconds and would violate the rule in [CLAUDE.md](../CLAUDE.md) about
+tuning physics to make walking easier. The shortfall is three orders of magnitude of
+control authority, not a few centimetres of foot.
+
+**Options, for a decision before slice 2:**
+
+1. **Accept it.** Evolution optimises the best two-second lurch. The fitness curve still
+   climbs — the shaped-fitness search went 0.13 → 0.89 — so slices 2 and 3 still work
+   mechanically. But the slice-3 payoff is a robot that face-plants slightly further away
+   each generation, which is a weak reward for the project's most important moment.
+2. **Add one feedback term to the parametric controller** *(recommended)*. A single gene
+   coupling torso pitch to hip target — `hipTarget += k · torsoAngle` — gives the
+   controller a world-frame reference and makes balance reachable. It costs one parameter,
+   keeps every existing gene meaning exactly what it meant, and stays legible enough for
+   the slice-5 stepper. It does mean the controller is no longer strictly open loop, which
+   is a change to §3 of the design document.
+3. **Bring the CPG controller forward.** It has sensory feedback by construction and is
+   already specified as the second controller. Larger genome (`9J + 4`), less legible, and
+   a bigger slice.
+
+Option 2 is the smallest change that removes the ceiling, and it preserves the teaching
+argument for the parametric encoding.
 
 ### Deliberately not in this slice
 
-No genetic algorithm, no fitness function, no optimisation of any kind, no asymmetry
-between legs, no sensory feedback. The controller is strictly open-loop: it is a function
-of time and nothing else.
+No genetic algorithm, no fitness function, no optimisation, no asymmetry between legs. The
+controller is strictly a function of time — which turns out to be exactly the problem.
 
 ---
 
 ## Slice 2 — The GA finds a gait
 
-> **Status: planned.** Two sessions. The most important slice in the project.
+> **Status: blocked.** Two sessions once unblocked. The most important slice in the
+> project — and the reason the [open-loop ceiling](#the-open-loop-ceiling) found in slice 1
+> must be resolved first. The operator design below stands whichever option is chosen; what
+> changes is the genome layout and how far fitness can climb.
 
 ### Goal
 

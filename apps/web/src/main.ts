@@ -1,47 +1,75 @@
 /**
- * Slice 0 — "it falls over".
+ * Slice 1 — "it walks, badly".
  *
- * A jointed 2D biped ragdolls onto a floor. No controller, no genetic algorithm, no UI
- * beyond a HUD. The point is to prove the physics and the render loop and nothing else.
+ * A hand-tunable open-loop gait drives the biped's joint motors. Ten sliders, live, no
+ * respawn needed. The exercise is to find something that walks; the discovery is that you
+ * cannot, really, and that is what slice 2 is for.
  */
 
-import { Rng, simpleBiped } from '@evolab/evolution';
-import { initPhysics, spawnFalling, TIMESTEP, type Sim } from '@evolab/sim';
+import { defaultGait, gaitPhase, simpleBiped, Rng, type GaitParams } from '@evolab/evolution';
+import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
 import { draw } from './render/draw.ts';
+import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d');
 if (!ctx) throw new Error('This browser cannot provide a 2D canvas context.');
 
+const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const hud = {
-  seed: document.getElementById('v-seed') as HTMLElement,
-  time: document.getElementById('v-time') as HTMLElement,
-  steps: document.getElementById('v-steps') as HTMLElement,
-  height: document.getElementById('v-height') as HTMLElement,
-  state: document.getElementById('v-state') as HTMLElement,
+  time: el('v-time'),
+  distance: el('v-distance'),
+  phase: el('v-phase'),
+  height: el('v-height'),
+  state: el('v-state'),
 };
 
 const morph = simpleBiped();
 
-// ?seed=42 and ?paused=1 — so a specific fall can be reproduced and inspected frame by
-// frame without touching the code. Cheap, and useful every time physics misbehaves.
 const params = new URLSearchParams(location.search);
 const seedParam = Number(params.get('seed'));
 
-let sim: Sim | null = null;
-let seed = Number.isFinite(seedParam) && params.has('seed') ? seedParam : 4417;
+let seed = params.has('seed') && Number.isFinite(seedParam) ? seedParam : 4417;
 let paused = params.get('paused') === '1';
+let driven = params.get('mode') !== 'ragdoll';
+let gait: GaitParams = params.has('gait') ? decodeGait(params.get('gait')!, defaultGait()) : defaultGait();
 
-/** Real time owed to the simulation but not yet stepped, in seconds. */
+let sim: Sim | null = null;
 let accumulator = 0;
 let lastFrame = 0;
+let peakDistance = 0;
+const scratch = new Map<string, number>();
 
-function respawn(nextSeed: number): void {
+const panel = createSliders(el('sliders'), gait, (next) => {
+  gait = next;
+  peakDistance = 0;
+  queueUrl();
+});
+
+/* ---------------- URL, debounced ---------------- */
+
+let urlTimer = 0;
+function queueUrl(): void {
+  clearTimeout(urlTimer);
+  urlTimer = window.setTimeout(() => {
+    const q = new URLSearchParams();
+    q.set('seed', String(seed));
+    q.set('gait', encodeGait(gait));
+    if (!driven) q.set('mode', 'ragdoll');
+    history.replaceState(null, '', `?${q.toString()}`);
+  }, 250);
+}
+
+/* ---------------- run control ---------------- */
+
+function respawn(nextSeed = seed): void {
   sim?.dispose();
   seed = nextSeed;
-  sim = spawnFalling(morph, new Rng(seed));
+  // A much smaller tilt than slice 0's ragdoll: enough to break perfect symmetry, not
+  // enough to be the reason it falls over.
+  sim = new Sim(morph, { tilt: new Rng(seed).range(-0.02, 0.02) });
   accumulator = 0;
-  hud.seed.textContent = String(seed);
+  peakDistance = 0;
 }
 
 function resize(): void {
@@ -52,6 +80,12 @@ function resize(): void {
   ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+function advance(steps: number): void {
+  if (!sim) return;
+  if (driven) stepControlled(sim, morph, gait, steps, scratch);
+  else sim.stepMany(steps);
+}
+
 function frame(now: number): void {
   requestAnimationFrame(frame);
   if (!sim) return;
@@ -60,36 +94,54 @@ function frame(now: number): void {
   lastFrame = now;
 
   if (!paused) {
-    // Invariant 1: fixed timestep. Accumulate real time, step a whole number of times,
-    // and never hand a frame delta to the solver.
+    // Ground rule 1: accumulate real time and step a whole number of fixed steps. The
+    // budget stops a backgrounded tab trying to catch up on ten seconds of physics.
     accumulator += dt;
     let budget = 0;
     while (accumulator >= TIMESTEP && budget < 600) {
-      sim.step();
+      advance(1);
       accumulator -= TIMESTEP;
       budget++;
     }
   }
 
   const snap = sim.snapshot();
+  peakDistance = Math.max(peakDistance, snap.distance);
+
   const rect = canvas.getBoundingClientRect();
   draw(ctx!, snap, rect.width, rect.height);
 
   hud.time.textContent = `${snap.time.toFixed(2)} s`;
-  hud.steps.textContent = String(snap.steps);
+  hud.distance.textContent = `${snap.distance.toFixed(2)} m  (peak ${peakDistance.toFixed(2)})`;
+  hud.phase.textContent = driven ? gaitPhase(gait, snap.time).toFixed(2) : '—';
   hud.height.textContent = `${snap.torsoHeight.toFixed(3)} m`;
-  hud.state.textContent = paused ? 'paused' : snap.fallen ? 'fallen' : 'upright';
+  hud.state.textContent = paused ? 'paused' : snap.fallen ? 'fallen' : driven ? 'driven' : 'ragdoll';
   hud.state.className = snap.fallen ? 'fell' : '';
 }
 
+/* ---------------- input ---------------- */
+
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'r' || e.key === 'R') respawn(seed + 1);
-  // Browsers disagree on whether the space bar is ' ' or 'Spacebar'; `code` does not.
+  if (e.target instanceof HTMLInputElement) return;
+  if (e.key === 'r' || e.key === 'R') respawn();
+  if (e.key === 'g' || e.key === 'G') {
+    driven = !driven;
+    respawn();
+    queueUrl();
+  }
   if (e.code === 'Space') {
     e.preventDefault();
     paused = !paused;
   }
-  if (e.key === '.' && paused && sim) sim.step();
+  if (e.key === '.' && paused) advance(1);
+});
+
+el('btn-reset').addEventListener('click', () => respawn());
+el('btn-default').addEventListener('click', () => {
+  gait = defaultGait();
+  panel.sync(gait);
+  respawn();
+  queueUrl();
 });
 
 window.addEventListener('resize', resize);
@@ -98,6 +150,7 @@ async function boot(): Promise<void> {
   await initPhysics();
   resize();
   respawn(seed);
+  queueUrl();
   requestAnimationFrame(frame);
 }
 

@@ -10,6 +10,19 @@ import type { Morphology, Rng } from '@evolab/evolution';
 export const TIMESTEP = 1 / 240;
 
 /**
+ * Default position-motor gains.
+ *
+ * `MotorModel.AccelerationBased` makes the motor solve for acceleration rather than
+ * force, so gains do not have to be re-scaled per limb inertia — one pair of numbers
+ * works for a 6 kg torso and a 0.6 kg foot alike. Treating them as a PD controller:
+ * stiffness is P and damping is D, giving a natural frequency of sqrt(400) = 20 rad/s
+ * (≈3.2 Hz) and a damping ratio of 1.0. Comfortably able to track a 1.4 Hz gait, and
+ * comfortably stable at a 240 Hz step.
+ */
+export const MOTOR_STIFFNESS = 400;
+export const MOTOR_DAMPING = 40;
+
+/**
  * Collision filtering: robot parts collide with the ground but never with each other.
  * Rapier packs membership in the high 16 bits and the filter mask in the low 16.
  */
@@ -44,6 +57,10 @@ export interface Snapshot {
   /** Height of the torso centre, metres. Below ~55% of standing means it fell. */
   readonly torsoHeight: number;
   readonly fallen: boolean;
+  /** Forward displacement of the torso from its spawn position, metres. */
+  readonly distance: number;
+  /** Actual joint angles relative to the rest pose, radians, keyed by joint id. */
+  readonly jointAngles: ReadonlyMap<string, number>;
 }
 
 let ready = false;
@@ -59,6 +76,8 @@ export interface SimOptions {
   /** Initial forward lean in radians. A small tilt is what makes it topple. */
   readonly tilt?: number;
   readonly gravity?: number;
+  readonly motorStiffness?: number;
+  readonly motorDamping?: number;
 }
 
 export class Sim {
@@ -71,7 +90,17 @@ export class Sim {
     ly: number;
     layer: 'near' | 'far' | 'body';
   }[] = [];
+  /** Revolute joints that accept a position target, with the bodies needed to read back. */
+  private readonly motors: {
+    id: string;
+    joint: RAPIER.RevoluteImpulseJoint;
+    parent: RAPIER.RigidBody;
+    child: RAPIER.RigidBody;
+  }[] = [];
   private readonly morph: Morphology;
+  private readonly stiffness: number;
+  private readonly damping: number;
+  private readonly spawnX: number;
   private stepCount = 0;
 
   constructor(morph: Morphology, opts: SimOptions = {}) {
@@ -79,6 +108,8 @@ export class Sim {
       throw new Error('Call await initPhysics() before constructing a Sim.');
     }
     this.morph = morph;
+    this.stiffness = opts.motorStiffness ?? MOTOR_STIFFNESS;
+    this.damping = opts.motorDamping ?? MOTOR_DAMPING;
     this.world = new RAPIER.World({ x: 0, y: opts.gravity ?? -9.81 });
     this.world.timestep = TIMESTEP;
 
@@ -114,6 +145,10 @@ export class Sim {
       this.bodies.set(s.id, body);
     }
 
+    // Recorded after the tilt is applied, so distance is measured from where the robot
+    // actually started rather than from the untilted rest pose.
+    this.spawnX = this.bodies.get('torso')?.translation().x ?? 0;
+
     for (const j of morph.joints) {
       const parent = this.bodies.get(j.parent);
       const child = this.bodies.get(j.child);
@@ -124,9 +159,19 @@ export class Sim {
         { x: j.parentAnchor[0], y: j.parentAnchor[1] },
         { x: j.childAnchor[0], y: j.childAnchor[1] },
       );
-      params.limitsEnabled = true;
-      params.limits = [j.limits[0], j.limits[1]];
-      this.world.createImpulseJoint(params, parent, child, true);
+      // createImpulseJoint returns the base class; limits and motors live on the revolute
+      // specialisation, so this cast is necessary and safe — we asked for a revolute
+      // joint on the line above.
+      const handle = this.world.createImpulseJoint(params, parent, child, true) as RAPIER.RevoluteImpulseJoint;
+
+      // Limits MUST be applied to the created joint, not to the JointData. Setting
+      // `params.limitsEnabled` / `params.limits` before creation is silently ignored for
+      // 2D revolute joints in Rapier 0.14 — the joint comes back with limitsEnabled()
+      // false and bounds of ±3.4e38. Slice 0 did it that way, so the biped had no joint
+      // limits at all and its knees bent both ways.
+      handle.setLimits(j.limits[0], j.limits[1]);
+      handle.configureMotorModel(RAPIER.MotorModel.AccelerationBased);
+      this.motors.push({ id: j.id, joint: handle, parent, child });
 
       const childSeg = morph.segments.find((s) => s.id === j.child);
       this.jointAnchors.push({
@@ -148,6 +193,32 @@ export class Sim {
   /** Advance by a number of steps. */
   stepMany(n: number): void {
     for (let i = 0; i < n; i++) this.step();
+  }
+
+  get steps(): number {
+    return this.stepCount;
+  }
+
+  get time(): number {
+    return this.stepCount * TIMESTEP;
+  }
+
+  /**
+   * Apply position targets to the joint motors. The simulator applies numbers; it does
+   * not decide them — targets come from a controller in `packages/evolution`, already
+   * clamped to the joint limits.
+   */
+  setJointTargets(targets: ReadonlyMap<string, number>): void {
+    for (const m of this.motors) {
+      const target = targets.get(m.id);
+      if (target === undefined) continue;
+      m.joint.configureMotorPosition(target, this.stiffness, this.damping);
+    }
+  }
+
+  /** Relax every motor, so the robot goes back to being a ragdoll. */
+  clearJointTargets(): void {
+    for (const m of this.motors) m.joint.configureMotorPosition(0, 0, 0);
   }
 
   snapshot(): Snapshot {
@@ -183,6 +254,14 @@ export class Sim {
     const torso = this.bodies.get('torso');
     const torsoHeight = torso ? torso.translation().y : 0;
 
+    // In 2D a body's rotation is a scalar, so a revolute joint's angle is simply the
+    // difference between child and parent rotations — zero in the rest pose, which is
+    // what the morphology's limits are expressed relative to.
+    const jointAngles = new Map<string, number>();
+    for (const m of this.motors) {
+      jointAngles.set(m.id, m.child.rotation() - m.parent.rotation());
+    }
+
     return {
       time: this.stepCount * TIMESTEP,
       steps: this.stepCount,
@@ -190,6 +269,8 @@ export class Sim {
       joints,
       torsoHeight,
       fallen: torsoHeight < 0.55 * this.morph.segments[0]!.y,
+      distance: torso ? torso.translation().x - this.spawnX : 0,
+      jointAngles,
     };
   }
 
@@ -198,6 +279,7 @@ export class Sim {
     this.world.free();
     this.bodies.clear();
     this.jointAnchors.length = 0;
+    this.motors.length = 0;
   }
 }
 
