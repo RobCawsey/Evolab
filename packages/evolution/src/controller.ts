@@ -146,6 +146,64 @@ export function gaitPhase(params: GaitParams, t: number): number {
   return cycles - Math.floor(cycles);
 }
 
+/* ---------------- genome codec ---------------- */
+
+/**
+ * A genome is a flat vector in [0, 1]^n. Every operator — selection, crossover, mutation —
+ * works in this unit space and never needs to know what a gene means, which is what keeps
+ * `operators.ts` free of any controller knowledge.
+ *
+ * The order matches the URL encoding in the slider panel, deliberately: a gait you found
+ * by hand and a gait evolution found are the same eleven numbers in the same order.
+ */
+export type Genome = Float32Array;
+
+export const GENOME_LENGTH = 11;
+
+/** Gene index -> parameter range, in genome order. The single source of truth for decode. */
+const GENE_RANGES: readonly (readonly [number, number])[] = [
+  GAIT_RANGES.frequency,
+  GAIT_RANGES.balanceGain,
+  GAIT_RANGES.hip.amplitude, GAIT_RANGES.hip.phase, GAIT_RANGES.hip.centre,
+  GAIT_RANGES.knee.amplitude, GAIT_RANGES.knee.phase, GAIT_RANGES.knee.centre,
+  GAIT_RANGES.ankle.amplitude, GAIT_RANGES.ankle.phase, GAIT_RANGES.ankle.centre,
+];
+
+function lerp(unit: number, index: number): number {
+  const [lo, hi] = GENE_RANGES[index]!;
+  return lo + clamp(unit, 0, 1) * (hi - lo);
+}
+
+function unlerp(value: number, index: number): number {
+  const [lo, hi] = GENE_RANGES[index]!;
+  return hi === lo ? 0 : clamp((value - lo) / (hi - lo), 0, 1);
+}
+
+/** Genome -> controller parameters. */
+export function decodeGenome(genome: Genome): GaitParams {
+  return {
+    frequency: lerp(genome[0]!, 0),
+    balanceGain: lerp(genome[1]!, 1),
+    hip: { amplitude: lerp(genome[2]!, 2), phase: lerp(genome[3]!, 3), centre: lerp(genome[4]!, 4) },
+    knee: { amplitude: lerp(genome[5]!, 5), phase: lerp(genome[6]!, 6), centre: lerp(genome[7]!, 7) },
+    ankle: { amplitude: lerp(genome[8]!, 8), phase: lerp(genome[9]!, 9), centre: lerp(genome[10]!, 10) },
+  };
+}
+
+/**
+ * Controller parameters -> genome. Needed to seed a run from a hand-tuned gait, and to
+ * round-trip in tests. Values outside their range are clamped rather than rejected.
+ */
+export function encodeGenome(p: GaitParams): Genome {
+  return Float32Array.from([
+    unlerp(p.frequency, 0),
+    unlerp(p.balanceGain, 1),
+    unlerp(p.hip.amplitude, 2), unlerp(p.hip.phase, 3), unlerp(p.hip.centre, 4),
+    unlerp(p.knee.amplitude, 5), unlerp(p.knee.phase, 6), unlerp(p.knee.centre, 7),
+    unlerp(p.ankle.amplitude, 8), unlerp(p.ankle.phase, 9), unlerp(p.ankle.centre, 10),
+  ]);
+}
+
 /** Structural clone with one joint's parameter replaced. Used by the slider panel. */
 export function withJointParam(
   params: GaitParams,

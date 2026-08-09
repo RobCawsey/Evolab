@@ -22,7 +22,7 @@ first.
 - **Slice 0** — [It falls over](#slice-0--it-falls-over) *(complete)*
 - **Slice 1** — [It walks, badly](#slice-1--it-walks-badly) *(complete — read
   [the motor stiffness trap](#the-motor-stiffness-trap))*
-- **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait)
+- **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait) *(complete)*
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it)
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
 - **Slice 5** — [The stepper](#slice-5--the-stepper)
@@ -119,8 +119,10 @@ Workers, canvas, storage, UI — all live in the app.
 
 ### 6. The golden test is never weakened to make a change pass
 
-Arrives in slice 2. If it fails, either the change is a bug or the change is intentional.
-Say which, in the commit message.
+It lives in `packages/evolution/__tests__/golden.test.ts` and pins twenty generations of
+best fitness for seed 4417 against a synthetic evaluator. Changing SBX eta by one breaks it.
+If it fails, either the change is a bug or the change is intentional — say which, in the
+commit message, and regenerate the numbers in the same commit.
 
 ### 7. SI units everywhere
 
@@ -151,6 +153,8 @@ The suite now runs in about 1.5 s, which is fast enough to run on every change. 
 | `packages/evolution/__tests__/rng.test.ts` | Pinned golden vector, replay, distribution, bounds |
 | `packages/evolution/__tests__/morphology.test.ts` | Mass, kinematic chain closure, limits, centre of mass |
 | `packages/evolution/__tests__/controller.test.ts` | Clamping, periodicity, leg phasing, feedback term |
+| `packages/evolution/__tests__/operators.test.ts` | Selection pressure, SBX invariants, mutation shape, codec |
+| `packages/evolution/__tests__/golden.test.ts` | Pinned 20-generation run, elitism, convergence |
 | `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
 
 Two habits worth keeping:
@@ -158,9 +162,13 @@ Two habits worth keeping:
 - **Write the test that would have caught the bug**, not a test near it. The mass assertion
   is three lines and is the entire defence against a units error that made every torque
   figure in the project meaningless.
-- **Verify a regression guard by reintroducing its bug.** All three guards above were
-  checked that way — revert the fix, watch the test fail, restore it. A regression test
-  that has never been seen to fail is a guess.
+- **Verify a regression guard by reintroducing its bug.** Every guard here was checked
+  that way — revert the fix, watch the test fail, restore it. A regression test that has
+  never been seen to fail is a guess. The golden test was checked the same way, by nudging
+  SBX eta from 15 to 16.
+- **Pair a property test with its negative.** `never loses ground, because of elitism` is
+  worth little on its own, because a search usually improves anyway. `loses ground when
+  elitism is switched off` is what proves the first test measures elitism.
 
 ---
 
@@ -216,8 +224,8 @@ and how to drive it; it does not know what a population is.
 |---|---|---|---|
 | 0 | [It falls over](#slice-0--it-falls-over) | 1 | **complete** |
 | 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | **complete** |
-| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | next |
-| 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | planned |
+| 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | **complete** |
+| 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | next |
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | planned |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
 | 6 | [Guided first run](#slice-6--guided-first-run) | 2 | planned |
@@ -622,12 +630,7 @@ controller is strictly a function of time — which turns out to be exactly the 
 
 ## Slice 2 — The GA finds a gait
 
-> **Status: next.** Two sessions. The most important slice in the project.
->
-> A 100-generation population search over these 11 parameters already reaches 12.6 m
-> without falling, using nothing but tournament selection and Gaussian mutation. That is
-> the bar a proper GA has to clear — if it does not, the fault is in the GA, not the
-> physics.
+> **Status: complete.** Two sessions.
 
 ### Goal
 
@@ -646,7 +649,7 @@ A `Float32Array` of length *n*, every gene in `[0, 1]`. Decoding maps each gene 
 per-parameter range. Keeping the genome in unit space means every operator is
 encoding-agnostic — mutation and crossover never need to know what a gene means.
 
-For the mirrored parametric controller of slice 1: `n = 10`.
+For the mirrored parametric controller of slice 1: `n = 11`.
 See [Appendix B](#appendix-b--genome-layouts) for the exact layout.
 
 ```ts
@@ -808,18 +811,57 @@ values are regenerated *in the same commit*, with the reason in the message.
 - **Watch diversity, not just fitness.** Collapsing diversity with flat fitness means
   premature convergence — the population has agreed on a mediocre answer. It is also the
   concept that slice 11 teaches, so getting the metric right now pays twice.
-- **Expect roughly 40 ms per generation** for 24 individuals × 4 s trials on one core
-  (see §4 of the design document), so 30 generations is about 1.4 s. If it is dramatically
-  slower, suspect undisposed worlds or a missing early-termination.
+- **Expect roughly 300 ms per generation** for 24 individuals × 4 s trials on one core.
+  An earlier draft said 40 ms, which was §4 of the design document quoted wrongly — that
+  figure already divides by seven workers, and workers do not arrive until slice 4. Per
+  trial the cost is ~12 µs per step, comfortably under the 30 µs the design document
+  budgets. If it is much slower than that, suspect undisposed worlds.
 
 ### Done when
 
-- `npm run evolve` finds a gait travelling further than the best hand-tuned slider setting
-  from slice 1.
-- The golden test passes and is committed with its expected values.
-- Diversity is reported and visibly falls over a run.
-- Re-running with the same seed produces byte-identical output.
-- Elitism demonstrably works: best fitness is monotonically non-decreasing.
+- [x] `npm run evolve` finds a gait travelling further than anything from slice 1.
+- [x] The golden test passes and is committed with its expected values.
+- [x] Diversity is reported and visibly falls over a run.
+- [x] Re-running with the same seed produces byte-identical output.
+- [x] Elitism demonstrably works: best fitness is monotonically non-decreasing.
+
+**Observed**, 120 generations of 24 individuals on 8 s trials, seed 4417:
+
+| | |
+|---|---|
+| Champion | 17.74 m, never fell, fitness 18.24 |
+| Slice 1 reference | 12.59 m |
+| Generalisation | 5/5 unseen tilts upright, 17.37–17.76 m, median 17.57 m |
+| Diversity | 1.38 → 0.06 |
+| Throughput | 602 ms/generation, 2642 trials in 72 s |
+| Monotonic | yes, elitism holds |
+
+A 30-generation 4 s run — the default — takes 9 s and reaches 4.8 m.
+
+### One flaw found, and it mattered
+
+The first working version set `trialSeed = island.generation`, so the initial tilt changed
+every generation. That looks harmless and is not, because **elites carry their fitness
+forward without being re-evaluated**. A genome that happened to draw a favourable tilt kept
+that score for ever, and the reported champion was part luck.
+
+It surfaced the only way it could have: the champion scored 17.1 m in the CLI and fell over
+at 3.5 s when the same eleven numbers were pasted into the slice-1 UI, which uses a
+different tilt. Two runs of the same gait disagreeing is a much louder signal than a fitness
+curve that merely looks optimistic.
+
+The fix is `IslandConfig.trialSeed`, fixed for the whole run. Every individual then faces
+identical conditions, elite fitness stays valid, and best fitness is genuinely monotonic.
+
+The cost is that a champion is tuned to one perturbation. Rather than hide that,
+`npm run evolve` now re-tests the champion on five unseen tilts and prints the spread — the
+same argument §6 of the design document makes for five-seed medians in the task suite, only
+arrived at by being bitten. With the fix the champion generalises cleanly; without it, it
+did not.
+
+**Rule worth keeping:** if any individual's score survives across generations, the
+conditions it was scored under must not change. Either hold them fixed or re-evaluate
+everything, every generation. Do not mix.
 
 ### Deliberately not in this slice
 
@@ -831,7 +873,7 @@ the algorithm underneath already works.
 
 ## Slice 3 — You can watch it
 
-> **Status: planned.** Two sessions. **This is the payoff.**
+> **Status: next.** Two sessions. **This is the payoff.**
 
 ### Goal
 
@@ -1243,20 +1285,23 @@ if bundle size ever matters.
 
 ### Parametric, mirrored (slices 2–6)
 
-`n = 10`. Genes are in `[0, 1]` and decode linearly into these ranges.
+`n = 11`. Genes are in `[0, 1]` and decode linearly into these ranges. The order matches
+the URL encoding in the slider panel, so a gait found by hand and a gait found by evolution
+are the same eleven numbers in the same order.
 
 | Index | Parameter | Range |
 |---|---|---|
 | 0 | gait frequency | 0.5 … 3.0 Hz |
-| 1 | hip amplitude | 0 … 0.8 rad |
-| 2 | hip phase | 0 … 2π |
-| 3 | hip centre | −0.5 … 0.5 rad |
-| 4 | knee amplitude | 0 … 0.9 rad |
-| 5 | knee phase | 0 … 2π |
-| 6 | knee centre | −0.8 … 0.1 rad |
-| 7 | ankle amplitude | 0 … 0.5 rad |
-| 8 | ankle phase | 0 … 2π |
-| 9 | ankle centre | −0.4 … 0.4 rad |
+| 1 | balance gain | −2 … 2 |
+| 2 | hip amplitude | 0 … 0.8 rad |
+| 3 | hip phase | 0 … 2π |
+| 4 | hip centre | −0.5 … 0.5 rad |
+| 5 | knee amplitude | 0 … 0.9 rad |
+| 6 | knee phase | 0 … 2π |
+| 7 | knee centre | −0.8 … 0.1 rad |
+| 8 | ankle amplitude | 0 … 0.5 rad |
+| 9 | ankle phase | 0 … 2π |
+| 10 | ankle centre | −0.4 … 0.4 rad |
 
 Left and right joints share parameters; the right side adds π to phase.
 
@@ -1270,8 +1315,8 @@ n = 1 + 3 · J          mirrored   (one triple per distinct joint type)
 n = 1 + 3 · J_total    independent (one triple per actuated joint)
 ```
 
-For the default biped, `J = 3` distinct types and `J_total = 6`, giving `n = 10` mirrored
-or `n = 19` independent. Mirroring becomes a per-run option rather than a constant, because
+For the default biped, `J = 3` distinct types and `J_total = 6`, giving `n = 11` mirrored
+or `n = 20` independent (the extra gene in each case is the balance gain). Mirroring becomes a per-run option rather than a constant, because
 an asymmetric gait is something worth discovering rather than ruling out. Genome length
 depends on joint count, so genomes do not transfer between morphologies — the UI must say
 so rather than silently producing nonsense.

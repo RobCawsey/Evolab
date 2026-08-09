@@ -18,9 +18,15 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
-**Slice 1 — "It walks, badly".** An open-loop parametric controller drives the joint
-motors, with eleven live sliders. The default gait lurches backwards and falls at 2 s; the
-best gait found so far walks 12.6 m without falling.
+**Slice 2 — "The GA finds a gait".** A genetic algorithm searches the eleven controller
+parameters: tournament selection, SBX crossover, polynomial mutation, two elites. Console
+output only. 120 generations finds a gait walking **17.7 m in 8 s without falling**, and it
+holds up on five unseen starting tilts.
+
+```bash
+npm run evolve                                  # 30 generations, 4 s trials, ~9 s
+npm run evolve -- --gens 120 --seconds 8        # the long one, ~70 s
+```
 
 Before touching the physics, read
 [the motor stiffness trap](docs/implementation.md#the-motor-stiffness-trap). A whole
@@ -28,9 +34,17 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 2 — the genetic algorithm. Specified in full in
-[docs/implementation.md](docs/implementation.md#slice-2--the-ga-finds-a-gait): genome
-layout, SBX and polynomial mutation formulas, island signatures, and the golden test.
+Next: slice 3 — the payoff. A live fitness chart beside a replay of the current champion,
+specified in [docs/implementation.md](docs/implementation.md#slice-3--you-can-watch-it).
+
+Two rules the GA earned the hard way, both written up in the slice 2 section:
+
+- **If a score survives across generations, the conditions it was scored under must not
+  change.** Elites are not re-evaluated, so a per-generation trial seed let a lucky genome
+  keep a stale high fitness. `IslandConfig.trialSeed` is fixed for a whole run.
+- **A champion is tuned to the one perturbation it was scored on.** `npm run evolve`
+  re-tests it on five unseen tilts and prints the spread, because a gait that only works
+  once is not a gait.
 
 Before starting a slice, read its section. After finishing one, rewrite that section to
 describe what was actually built and expand the next one.

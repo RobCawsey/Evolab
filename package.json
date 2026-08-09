@@ -14,7 +14,8 @@
     "build": "npm run build --workspace @evolab/web",
     "check": "tsc --noEmit -p tsconfig.json",
     "sim": "node --experimental-strip-types scripts/headless.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "evolve": "node --experimental-strip-types scripts/evolve.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
