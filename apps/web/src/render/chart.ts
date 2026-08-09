@@ -5,7 +5,17 @@
  * the axes honest — every decision about what the reader sees is visible in this file.
  */
 
-import type { GenerationSummary } from '@evolab/evolution';
+/**
+ * The minimum a point needs to be drawable. `GenerationSummary` satisfies it structurally,
+ * and so does the ring aggregate the pool produces — which is what the chart shows from
+ * slice 4 onward, since islands advance independently and there is no single population.
+ */
+export interface ChartPoint {
+  readonly best: number;
+  readonly mean: number;
+  readonly worst: number;
+  readonly diversity: number;
+}
 
 const COLOURS = {
   grid: '#1f1e2b',
@@ -29,7 +39,7 @@ export interface ChartOptions {
 
 export function drawChart(
   ctx: CanvasRenderingContext2D,
-  history: readonly GenerationSummary[],
+  history: readonly ChartPoint[],
   width: number,
   height: number,
   opts: ChartOptions = {},
@@ -133,10 +143,10 @@ export function drawChart(
 
 function line(
   ctx: CanvasRenderingContext2D,
-  history: readonly GenerationSummary[],
+  history: readonly ChartPoint[],
   x: (g: number) => number,
   y: (v: number) => number,
-  pick: (h: GenerationSummary) => number,
+  pick: (h: ChartPoint) => number,
   colour: string,
   width: number,
 ): void {

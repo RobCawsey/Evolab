@@ -199,6 +199,54 @@ export function stepGeneration(island: Island, evaluate: Evaluator): GenerationS
   return completeGeneration(island, evaluations);
 }
 
+/* ---------------- migration ---------------- */
+
+/**
+ * Copies of the fittest `count` genomes, for sending to a neighbouring island.
+ *
+ * Copies, not references. The caller will almost certainly transfer these across a worker
+ * boundary, and a transferred `ArrayBuffer` is detached on the sending side — handing out
+ * the island's own genomes would empty its population.
+ */
+export function emigrants(island: Island, count: number): Genome[] {
+  const ranked = [...island.population].sort((a, b) => b.fitness - a.fitness);
+  const n = Math.min(count, ranked.length);
+  const out: Genome[] = [];
+  for (let i = 0; i < n; i++) out.push(Float32Array.from(ranked[i]!.genes));
+  return out;
+}
+
+/**
+ * Accept migrants, replacing the least fit individuals.
+ *
+ * Arrivals come in unscored and are marked pending, so they face this island's evaluator on
+ * the next generation rather than carrying a fitness earned somewhere else. Islands share a
+ * morphology and a trial seed today, so the score would in fact be identical — but relying
+ * on that would make the two configurations silently coupled, and it is one trial.
+ *
+ * Never displaces more than half the population, however many arrive: a flood of migrants
+ * would otherwise wipe out exactly the local variation the island model exists to preserve.
+ */
+export function immigrate(island: Island, incoming: readonly Genome[]): number {
+  if (incoming.length === 0) return 0;
+  const limit = Math.floor(island.population.length / 2);
+  const take = Math.min(incoming.length, limit);
+  if (take === 0) return 0;
+
+  const order = island.population
+    .map((ind, index) => ({ index, fitness: ind.fitness }))
+    .sort((a, b) => a.fitness - b.fitness);
+
+  for (let i = 0; i < take; i++) {
+    island.population[order[i]!.index] = {
+      genes: Float32Array.from(incoming[i]!),
+      fitness: 0,
+      result: null,
+    };
+  }
+  return take;
+}
+
 /** Convenience: run `generations` of a fresh island and return every summary. */
 export function evolve(
   island: Island,

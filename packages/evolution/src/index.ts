@@ -36,6 +36,8 @@ export {
   evaluatePending,
   completeGeneration,
   pendingCount,
+  emigrants,
+  immigrate,
   evolve,
   DEFAULT_CONFIG,
 } from './island.ts';

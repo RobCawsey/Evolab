@@ -1,9 +1,9 @@
 /**
- * Slice 3 — "you can watch it".
+ * Slice 4 — "off the main thread".
  *
  * A fitness chart climbing beside a live replay of the current champion, with the slice-1
  * sliders still there so a hand-tuned gait and an evolved one can be compared on the same
- * screen. Evolution runs on the main thread, sliced across frames; workers are slice 4.
+ * screen. The search itself runs in Web Workers — one island each, trading migrants
  */
 
 import {
@@ -13,12 +13,14 @@ import {
   Rng,
   type GaitParams,
 } from '@evolab/evolution';
-import { initPhysics, makeEvaluator, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
+import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
 import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
-import { activeGait, adoptChampion, createRunState, resetRun } from './run/state.ts';
-import { advanceSearch, generationsPerSecond, trialsPerSecond } from './run/loop.ts';
+import {
+  activeGait, adoptChampion, createRunState, offerChampion, sampleHistory, spawnPool,
+} from './run/state.ts';
+import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const stage = el<HTMLCanvasElement>('stage');
@@ -40,7 +42,7 @@ const hud = {
 const stat = {
   gen: el('s-gen'), progress: el('s-progress'), best: el('s-best'), mean: el('s-mean'),
   div: el('s-div'), trials: el('s-trials'), tps: el('s-tps'), gps: el('s-gps'),
-  elapsed: el('s-elapsed'), chartGen: el('chart-gen'),
+  elapsed: el('s-elapsed'), chartGen: el('chart-gen'), speedup: el('s-speedup'),
 };
 const champ = {
   dist: el('c-dist'), upright: el('c-upright'), effort: el('c-effort'),
@@ -58,7 +60,9 @@ const num = (key: string, fallback: number) => {
 };
 
 const gaitParam = params.get('gait');
+const workersParam = params.has('workers') ? Math.max(1, num('workers', 1)) : undefined;
 const state = createRunState({
+  ...(workersParam === undefined ? {} : { workers: workersParam }),
   seed: num('seed', 4417),
   target: num('gens', 40),
   trialSeconds: num('seconds', 4),
@@ -67,7 +71,27 @@ const state = createRunState({
   mode: params.get('mode') === 'evolved' ? 'evolved' : 'manual',
 });
 
-const evaluator = makeEvaluator(morph, { seconds: state.trialSeconds });
+/**
+ * Bring the ring up. Workers initialise in parallel — each pays about 40 ms for its own
+ * Rapier instance — so this happens at start-up rather than on the first press of Run.
+ */
+function startPool(): void {
+  el('btn-run').setAttribute('disabled', '');
+  spawnPool(state, morph, {
+    onReady: () => {
+      el('btn-run').removeAttribute('disabled');
+      paintIslands();
+    },
+    onGeneration: (_id, summary) => {
+      if (offerChampion(state, summary)) {
+        el('btn-adopt').removeAttribute('disabled');
+        if (state.history.length <= 1) setMode('evolved');
+        else if (state.mode === 'evolved') respawn();
+      }
+    },
+    onError: (id, message) => console.error(`island ${id}:`, message),
+  });
+}
 
 /* ---------------- replay ---------------- */
 
@@ -108,16 +132,25 @@ function setMode(mode: 'manual' | 'evolved'): void {
 }
 
 function setRunning(running: boolean): void {
-  state.running = running && state.island.generation < state.target;
+  const pool = state.pool;
+  if (!pool || !pool.ready) return;
+  state.running = running && pool.generation < state.target;
   el('btn-run').textContent = state.running ? 'Pause' : 'Run';
+  if (state.running) {
+    state.startedAt = performance.now();
+    pool.run(state.target);
+  } else {
+    pool.pause();
+  }
 }
 
 el('btn-run').addEventListener('click', () => setRunning(!state.running));
 el('btn-reset').addEventListener('click', () => {
-  resetRun(state);
-  setMode('manual');
-  setRunning(false);
+  state.running = false;
+  el('btn-run').textContent = 'Run';
   el('btn-adopt').setAttribute('disabled', '');
+  startPool();
+  setMode('manual');
 });
 el('mode-manual').addEventListener('click', () => setMode('manual'));
 el('mode-evolved').addEventListener('click', () => setMode('evolved'));
@@ -167,15 +200,17 @@ function resize(): void {
 function frame(now: number): void {
   requestAnimationFrame(frame);
 
-  // --- search -------------------------------------------------------------------
-  const progress = advanceSearch(state, evaluator);
-  // advanceSearch stops itself at the target; keep the button label honest about it.
-  if (!state.running && el('btn-run').textContent === 'Pause') setRunning(false);
-  if (progress.newChampion) {
-    el('btn-adopt').removeAttribute('disabled');
-    // Auto-follow the first champion, so the payoff does not need a click to be seen.
-    if (state.history.length === 1) setMode('evolved');
-    else if (state.mode === 'evolved') respawn();
+  // --- sample the ring ----------------------------------------------------------
+  // The workers own the search now. All the frame does is read what they have reported,
+  // which is why the frame budget is no longer a constraint on throughput.
+  if (state.running && state.pool) {
+    state.elapsedMs = performance.now() - state.startedAt;
+    sampleHistory(state);
+    if (state.pool.generation >= state.target) {
+      state.running = false;
+      state.pool.pause();
+      el('btn-run').textContent = 'Run';
+    }
   }
 
   // --- replay -------------------------------------------------------------------
@@ -222,20 +257,23 @@ function frame(now: number): void {
 }
 
 function paintStats(): void {
+  const pool = state.pool;
   const last = state.history[state.history.length - 1];
-  const gen = state.island.generation;
+  const gen = pool && Number.isFinite(pool.generation) ? pool.generation : 0;
   stat.gen.textContent = `${gen} / ${state.target}`;
   stat.chartGen.textContent = `generation ${gen}`;
   stat.progress.style.width = `${Math.min(100, (gen / state.target) * 100)}%`;
   stat.best.textContent = last ? last.best.toFixed(3) : '—';
   stat.mean.textContent = last ? last.mean.toFixed(3) : '—';
   stat.div.textContent = last ? last.diversity.toFixed(3) : '—';
-  stat.trials.textContent = String(state.trials);
-  stat.tps.textContent = state.trials ? trialsPerSecond(state).toFixed(0) : '—';
+  stat.trials.textContent = String(pool?.trials ?? 0);
+  stat.tps.textContent = pool?.trials ? trialsPerSecond(state).toFixed(0) : '—';
   stat.gps.textContent = state.history.length ? generationsPerSecond(state).toFixed(1) : '—';
   stat.elapsed.textContent = `${(state.elapsedMs / 1000).toFixed(1)} s`;
+  stat.speedup.textContent = pool?.trials ? `${parallelSpeedup(state).toFixed(1)}×` : '—';
+  paintIslands();
 
-  const r = state.champion && last ? last.bestResult : null;
+  const r = state.champion ? state.champion.summary.bestResult : null;
   champ.dist.textContent = r ? `${r.distance.toFixed(2)} m` : '—';
   champ.upright.textContent = r ? `${r.uprightTime.toFixed(2)} s of ${state.trialSeconds}` : '—';
   champ.effort.textContent = r ? `${r.effort.toFixed(0)} rad` : '—';
@@ -248,13 +286,45 @@ function paintStats(): void {
   }
 }
 
+/**
+ * One row per island: generation, best fitness, and a flag when a migrant arrival was
+ * followed by a jump. Migration is meant to be observable rather than merely believed in.
+ */
+function paintIslands(): void {
+  const pool = state.pool;
+  const host = el('islands');
+  if (!pool) return;
+  if (host.childElementCount !== pool.islands.length) {
+    host.replaceChildren(...pool.islands.map(() => {
+      const row = document.createElement('div');
+      row.className = 'kv island';
+      row.innerHTML = '<span></span><i class="bar"></i><b></b>';
+      return row;
+    }));
+  }
+  const best = pool.best || 1;
+  pool.islands.forEach((isl, i) => {
+    const row = host.children[i] as HTMLElement;
+    const [label, bar, value] = row.children as unknown as [HTMLElement, HTMLElement, HTMLElement];
+    label.textContent = `${String(i).padStart(2, '0')}  g${isl.generation}`;
+    bar.style.width = `${Math.max(2, (isl.best / best) * 100)}%`;
+    value.textContent = isl.ready ? isl.best.toFixed(2) : 'init';
+    row.classList.toggle('boosted', isl.boosted);
+    value.className = isl.boosted ? 'am' : '';
+  });
+}
+
 /* ---------------- boot ---------------- */
 
 async function boot(): Promise<void> {
+  // The main thread still needs its own Rapier instance for the replay. WASM memory is not
+  // shared, so the workers each bring up their own — that is what the ready gate is for.
   await initPhysics();
   resize();
   respawn();
-  setMode(state.mode === 'evolved' && state.champion ? 'evolved' : 'manual');
+  el('s-workers').textContent = String(state.workers);
+  startPool();
+  setMode('manual');
   queueUrl();
   requestAnimationFrame(frame);
 }

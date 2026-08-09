@@ -1,47 +1,49 @@
 /**
  * Everything the page knows about the current search, in one plain object.
  *
- * No state library. Zustand arrives around slice 6, when several panels need to share
- * state and prop-drilling starts to hurt; until then a module-scoped object and a redraw
- * every frame is simpler and easier to reason about.
+ * As of slice 4 the search itself lives in workers; this holds the aggregated view of it.
+ * No state library — Zustand arrives around slice 6, when several panels need to share
+ * state and prop-drilling starts to hurt.
  */
 
 import {
-  createIsland,
   decodeGenome,
   defaultGait,
   encodeGenome,
   type GaitParams,
   type GenerationSummary,
   type Genome,
-  type Island,
+  type Morphology,
 } from '@evolab/evolution';
+import { IslandPool, defaultWorkerCount, type PoolEvents } from '../workers/pool.ts';
 
 export type Mode = 'manual' | 'evolved';
 
+/** One point on the fitness chart: the ring aggregated at a generation boundary. */
+export interface HistoryPoint {
+  readonly generation: number;
+  readonly best: number;
+  readonly mean: number;
+  readonly worst: number;
+  readonly diversity: number;
+}
+
 export interface RunState {
-  island: Island;
-  history: GenerationSummary[];
-  champion: { genes: Genome; fitness: number; params: GaitParams } | null;
+  pool: IslandPool | null;
+  history: HistoryPoint[];
+  champion: { genes: Genome; fitness: number; params: GaitParams; summary: GenerationSummary } | null;
   running: boolean;
   target: number;
   seed: number;
   trialSeconds: number;
   population: number;
-  /** Which gait the stage is showing: the sliders, or the best genome found. */
+  workers: number;
   mode: Mode;
   manualGait: GaitParams;
-  /** Wall-clock milliseconds spent evaluating, for an honest trials/second readout. */
+  /** Generation of the slowest island at the last history sample. */
+  lastRecorded: number;
+  startedAt: number;
   elapsedMs: number;
-  trials: number;
-  /**
-   * Trials run so far towards the generation currently in progress.
-   *
-   * A generation spans several frames, so the count has to survive between them —
-   * otherwise the summary would report only the trials that happened to land on the frame
-   * where the generation completed.
-   */
-  pendingEvaluations: number;
 }
 
 export interface RunOptions {
@@ -49,62 +51,95 @@ export interface RunOptions {
   target?: number;
   trialSeconds?: number;
   population?: number;
+  workers?: number;
   manualGait?: GaitParams;
   mode?: Mode;
 }
 
 export function createRunState(opts: RunOptions = {}): RunState {
-  const seed = opts.seed ?? 4417;
-  const target = opts.target ?? 40;
-  const trialSeconds = opts.trialSeconds ?? 4;
-  const population = opts.population ?? 24;
   return {
-    island: createIsland(0, seed, { size: population, trialSeconds }),
+    pool: null,
     history: [],
     champion: null,
     running: false,
-    target,
-    seed,
-    trialSeconds,
-    population,
+    target: opts.target ?? 40,
+    seed: opts.seed ?? 4417,
+    trialSeconds: opts.trialSeconds ?? 4,
+    population: opts.population ?? 24,
+    workers: opts.workers ?? defaultWorkerCount(),
     mode: opts.mode ?? 'manual',
     manualGait: opts.manualGait ?? defaultGait(),
+    lastRecorded: -1,
+    startedAt: 0,
     elapsedMs: 0,
-    trials: 0,
-    pendingEvaluations: 0,
   };
 }
 
-/** Throw away the search and start again with the current settings. */
-export function resetRun(state: RunState): void {
-  state.island = createIsland(0, state.seed, {
-    size: state.population,
-    trialSeconds: state.trialSeconds,
-  });
+/**
+ * Build a fresh pool. Workers initialise in parallel — each pays roughly 40 ms to bring up
+ * its own Rapier instance, and doing that at start-up rather than on the first Run keeps
+ * the button honest.
+ */
+export function spawnPool(
+  state: RunState,
+  morphology: Morphology,
+  events: PoolEvents = {},
+): IslandPool {
+  state.pool?.dispose();
+  const pool = new IslandPool(
+    {
+      morphology,
+      seed: state.seed,
+      workers: state.workers,
+      trialSeconds: state.trialSeconds,
+      config: { size: state.population, trialSeconds: state.trialSeconds },
+    },
+    events,
+  );
+  state.pool = pool;
   state.history = [];
   state.champion = null;
   state.running = false;
+  state.lastRecorded = -1;
+  state.startedAt = 0;
   state.elapsedMs = 0;
-  state.trials = 0;
-  state.pendingEvaluations = 0;
+  return pool;
 }
 
 /**
- * Record a generation, promoting its best genome to champion if it improved.
+ * Promote a summary to champion if it beats the incumbent.
  *
- * Elitism guarantees `best` never decreases, so the comparison is a formality — but it is
- * the formality that stops the replay being respawned every single generation when nothing
- * has actually changed.
+ * Elitism makes each island's own best monotonic, but across islands it is not — island 3
+ * reporting generation 9 after island 1 reported generation 12 is normal. So this compares
+ * rather than assuming.
  */
-export function recordGeneration(state: RunState, summary: GenerationSummary): boolean {
-  state.history.push(summary);
-  state.trials += summary.evaluations;
+export function offerChampion(state: RunState, summary: GenerationSummary): boolean {
   if (state.champion !== null && summary.best <= state.champion.fitness) return false;
   state.champion = {
     genes: summary.bestGenome,
     fitness: summary.best,
     params: decodeGenome(summary.bestGenome),
+    summary,
   };
+  return true;
+}
+
+/** Sample the ring into the chart when the slowest island crosses a generation boundary. */
+export function sampleHistory(state: RunState): boolean {
+  const pool = state.pool;
+  if (!pool) return false;
+  const generation = pool.generation;
+  if (!Number.isFinite(generation) || generation <= state.lastRecorded) return false;
+  state.lastRecorded = generation;
+  state.history.push({
+    generation,
+    best: pool.best,
+    mean: pool.mean,
+    // The ring has no single worst; the weakest island mean is the honest floor for a band
+    // that is meant to show the population spreading rather than a precise minimum.
+    worst: pool.islands.reduce((m, i) => Math.min(m, i.mean), Infinity) || 0,
+    diversity: pool.meanDiversity,
+  });
   return true;
 }
 

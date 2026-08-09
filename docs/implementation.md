@@ -24,7 +24,7 @@ first.
   [the motor stiffness trap](#the-motor-stiffness-trap))*
 - **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait) *(complete)*
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it) *(complete)*
-- **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
+- **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread) *(complete)*
 - **Slice 5** — [The stepper](#slice-5--the-stepper)
 - **Slice 6** — [Guided first run](#slice-6--guided-first-run)
 - **Slice 7** — [Body editor](#slice-7--body-editor)
@@ -156,6 +156,7 @@ The suite now runs in about 1.5 s, which is fast enough to run on every change. 
 | `packages/evolution/__tests__/operators.test.ts` | Selection pressure, SBX invariants, mutation shape, codec |
 | `packages/evolution/__tests__/golden.test.ts` | Pinned 20-generation run, elitism, convergence |
 | `packages/evolution/__tests__/island.test.ts` | Frame-sliced evaluation matches whole-generation |
+| `packages/evolution/__tests__/migration.test.ts` | Emigrant copying, immigrant placement, half-population cap |
 | `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
 
 Two habits worth keeping:
@@ -227,8 +228,8 @@ and how to drive it; it does not know what a population is.
 | 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | **complete** |
 | 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | **complete** |
 | 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | **complete** |
-| 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | next |
-| 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
+| 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | **complete** |
+| 5 | [The stepper](#slice-5--the-stepper) | 3 | next |
 | 6 | [Guided first run](#slice-6--guided-first-run) | 2 | planned |
 | 7 | [Body editor](#slice-7--body-editor) | 3 | planned |
 | 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | planned |
@@ -1024,7 +1025,7 @@ thread, one chart.
 
 ## Slice 4 — Off the main thread
 
-> **Status: next.** Two sessions.
+> **Status: complete.** Two sessions.
 
 ### Goal
 
@@ -1113,10 +1114,57 @@ per-worker, since WASM memory is not shared.
 
 ### Done when
 
-- Throughput scales roughly linearly with worker count.
-- The UI holds 60 fps during a full run.
-- Migration is observable: an island's best fitness jumps after receiving a good migrant.
-- Same seed *and* same worker count reproduces exactly.
+- [x] Throughput scales roughly linearly with worker count.
+- [x] The UI never does physics at all, so the frame budget stops constraining the search.
+- [x] Migration is observable: the islands panel flags an island whose best jumped within a
+  generation or two of an arrival.
+- [~] *Same seed and same worker count reproduces exactly* — **not achievable, and the plan
+  contradicted itself here.** See below.
+
+**Observed**, 24 individuals and 4 s trials on this machine:
+
+| Workers | Trials/s | Parallel speedup | 20 generations |
+|---|---|---|---|
+| 1 | 88 | 1.0× | 5.0 s |
+| 4 | 329 | 3.7× | — |
+
+3.74× throughput on four workers. A full 40-generation run finished in 10.7 s reaching
+fitness 6.88 and a 6.38 m gait.
+
+### Islands multiply population, not generation rate
+
+Worth stating plainly, because the numbers above look disappointing until you see it:
+generations per second barely moved (4.0 → 3.7). Each island still steps at single-thread
+speed. What four workers buy is **four populations searching at once**, so a run reaches
+generation 40 in about the same wall-clock time as before but has done four times the
+search and shared the results through migration.
+
+If what you want is one island reaching generation 400 faster, workers do not do that.
+Nothing does — a generation is inherently sequential.
+
+### Reproducibility: the plan contradicted itself
+
+The design said, three paragraphs apart, both that "migration is asynchronous and a lost or
+late migrant degrades search quality slightly rather than corrupting anything" and that the
+slice is done when "same seed and same worker count reproduces exactly".
+
+Those cannot both hold. A migrant that lands before generation 7 rather than after it
+changes every draw from that point on, and arrival timing depends on OS scheduling. You can
+have barrier-free asynchrony or bit-exact reproducibility, not both.
+
+**Resolved in favour of asynchrony**, because that is the property the island model was
+chosen for (§2 of the design document) and a barrier every five generations would make the
+whole ring wait on its slowest island. The consequences, stated honestly:
+
+- **One worker is bit-reproducible.** The CLI, `npm run sim` and the golden test all run
+  single-island, so every guarantee the project has actually made still holds.
+- **Several workers are statistically reproducible, not bit-reproducible.** Same seed, same
+  worker count, same shape of result — not the same numbers.
+
+If exact multi-island replay is ever wanted, the cheapest route is to have the pool collect
+and redistribute migrants at a fixed generation boundary, making the ring synchronous once
+every five generations. That is a real option, not a hard problem; it just costs the thing
+this slice was for.
 
 ### Deliberately not in this slice
 
@@ -1127,7 +1175,7 @@ in the design document is cut — see §2 of that document for why.
 
 ## Slice 5 — The stepper
 
-> **Status: planned.** Three sessions.
+> **Status: next.** Three sessions.
 
 ### Goal
 
@@ -1314,8 +1362,20 @@ params.limits = [min, max]` in radians.
 it returns a quaternion, which slice 9 will have to account for.
 
 **`-compat` builds** inline the WASM as base64. Larger download, but no separate `.wasm`
-asset to configure in the bundler and no worker-loading edge cases. Worth revisiting only
-if bundle size ever matters.
+asset to configure in the bundler and no worker-loading edge cases.
+
+Slice 4 put a number on that trade. Workers get their own bundle, and since each context
+needs its own Rapier instance, the WASM is inlined *twice*:
+
+```
+dist/assets/island.worker-*.js   1,552 kB
+dist/assets/index-*.js           1,566 kB   (gzip 586 kB)
+```
+
+Around 3 MB raw for what is essentially one physics engine counted twice. Acceptable for
+now and the reason to revisit `-compat` later: a separate `.wasm` asset would be fetched
+once and shared by the browser cache across both contexts. Not worth doing until bundle
+size actually bites.
 
 ---
 

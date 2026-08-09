@@ -18,23 +18,26 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
-**Slice 3 — "You can watch it".** The payoff. `npm run dev` gives a live fitness chart
-beside a replay of the current champion, with the slice-1 sliders still there so a
-hand-tuned gait and an evolved one can be compared on the same screen. Press Run.
-
-The search runs on the main thread, sliced across frames: a generation costs ~300 ms and a
-frame is 16 ms, so the loop spends 8 ms per frame evaluating and yields. `evaluatePending` +
-`completeGeneration` are the incremental pair; `stepGeneration` is both together and is what
-the CLI and the golden test use. A test asserts the two paths produce identical runs.
+**Slice 4 — "Off the main thread".** The search runs in Web Workers, one island each,
+trading two elites round a ring every five generations. The UI thread does no physics at
+all beyond the champion replay. Measured 88 trials/s on one worker and 329 on four —
+**3.7× on four cores** — and a 40-generation run finishes in about 11 seconds.
 
 ```bash
-npm run dev                                     # the app
-npm run evolve                                  # headless, 30 generations, ~9 s
+npm run dev                                     # the app; ?workers=1 to compare
+npm run evolve                                  # headless, single island, 30 gens, ~9 s
 npm run evolve -- --gens 120 --seconds 8        # the long one, ~70 s, reaches 17.7 m
 ```
 
-Note the search is driven by `requestAnimationFrame`, so a hidden tab throttles it to a
-crawl. That is browser behaviour, not a bug, and slice 4's workers remove it.
+Two things about workers that are easy to misread:
+
+- **Islands multiply population, not generation rate.** Generations per second barely
+  changes; what four workers buy is four populations searching at once. Nothing makes a
+  single island reach generation 400 faster — a generation is sequential.
+- **Multi-worker runs are not bit-reproducible.** Migration is asynchronous, so a migrant
+  landing before generation 7 rather than after changes everything downstream. One worker
+  *is* bit-reproducible, and the CLI, `npm run sim` and the golden test all run
+  single-island, so every guarantee the project makes still holds.
 
 Before touching the physics, read
 [the motor stiffness trap](docs/implementation.md#the-motor-stiffness-trap). A whole
@@ -42,9 +45,12 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 4 — evaluation moves into Web Workers, one island per worker, with ring
-migration. Specified in
-[docs/implementation.md](docs/implementation.md#slice-4--off-the-main-thread).
+Next: slice 5 — the generation stepper, the teaching screen. Specified in
+[docs/implementation.md](docs/implementation.md#slice-5--the-stepper). Note its key idea:
+convert `stepGeneration` into a generator that yields at each operator boundary, so normal
+running and single-stepping drive the same code rather than two implementations. That
+conversion must leave the golden test passing untouched — if it does not, the order of RNG
+draws moved.
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 
