@@ -93,28 +93,58 @@ export function createIsland(
   return { id, rng, config: cfg, generation: 0, population };
 }
 
-/**
- * Evaluate, select, breed, replace. One generation, returned as a summary.
- *
- * Order matters and is fixed: the whole population is scored before any selection happens,
- * so an individual's fitness never depends on where it sits in the array.
- */
-export function stepGeneration(island: Island, evaluate: Evaluator): GenerationSummary {
-  const { config: cfg, rng } = island;
-  const mutationRate = cfg.mutationRate ?? 1 / cfg.genomeLength;
+/** How many individuals still need a trial before this generation can complete. */
+export function pendingCount(island: Island): number {
+  let n = 0;
+  for (const ind of island.population) if (ind.result === null) n++;
+  return n;
+}
 
-  // --- evaluate -----------------------------------------------------------------
-  // Elites carried from the previous generation already have a fitness and are not
-  // re-run: the evaluator is deterministic in (genome, seed), so a second trial would
-  // return the same numbers and cost the same time.
+/**
+ * Evaluate individuals that do not yet have a result, stopping when `shouldContinue`
+ * returns false. Returns how many trials were run.
+ *
+ * Splitting evaluation out of the generation is what lets a browser run a search without
+ * freezing: a generation of 24 four-second trials costs roughly 300 ms on one core, which
+ * is twenty times a frame, so the UI evaluates a few individuals per frame instead.
+ *
+ * The budget check is a predicate supplied by the caller rather than a clock read here —
+ * `packages/evolution` has no timers (ground rule 3), and this keeps it that way.
+ *
+ * Elites carried from the previous generation already have a result and are skipped: the
+ * evaluator is deterministic in `(genome, trialSeed)`, so re-running one would return the
+ * same numbers at the same cost. That is also why `trialSeed` must not vary by generation —
+ * see `IslandConfig.trialSeed`.
+ */
+export function evaluatePending(
+  island: Island,
+  evaluate: Evaluator,
+  shouldContinue: () => boolean = () => true,
+): number {
+  const cfg = island.config;
   let evaluations = 0;
   for (const ind of island.population) {
     if (ind.result !== null) continue;
+    if (evaluations > 0 && !shouldContinue()) break;
     const result = evaluate(ind.genes, cfg.trialSeed);
     ind.result = result;
     ind.fitness = score(result, cfg.trialSeconds, cfg.objective).total;
     evaluations++;
   }
+  return evaluations;
+}
+
+/**
+ * Rank the scored population, breed the next one, advance the generation counter.
+ *
+ * Must only be called once every individual has a result — `stepGeneration` guarantees
+ * that, and the incremental caller checks `pendingCount` first. Everything that consumes
+ * randomness happens here, in a fixed order, which is what makes the golden test stable
+ * regardless of how evaluation was scheduled.
+ */
+export function completeGeneration(island: Island, evaluations: number): GenerationSummary {
+  const { config: cfg, rng } = island;
+  const mutationRate = cfg.mutationRate ?? 1 / cfg.genomeLength;
 
   // --- rank ---------------------------------------------------------------------
   const ranked = [...island.population].sort((a, b) => b.fitness - a.fitness);
@@ -155,6 +185,18 @@ export function stepGeneration(island: Island, evaluate: Evaluator): GenerationS
   island.population = next;
   island.generation++;
   return summary;
+}
+
+/**
+ * Evaluate, select, breed, replace. One whole generation, returned as a summary.
+ *
+ * The all-at-once form, used by the CLI and the tests. The browser drives
+ * `evaluatePending` and `completeGeneration` separately so it can yield to the frame,
+ * but the sequence of random draws is identical either way.
+ */
+export function stepGeneration(island: Island, evaluate: Evaluator): GenerationSummary {
+  const evaluations = evaluatePending(island, evaluate);
+  return completeGeneration(island, evaluations);
 }
 
 /** Convenience: run `generations` of a fresh island and return every summary. */

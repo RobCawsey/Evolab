@@ -30,5 +30,13 @@ export {
 export { score, DEFAULT_OBJECTIVE } from './fitness.ts';
 export type { TrialResult, Objective, FitnessBreakdown } from './fitness.ts';
 
-export { createIsland, stepGeneration, evolve, DEFAULT_CONFIG } from './island.ts';
+export {
+  createIsland,
+  stepGeneration,
+  evaluatePending,
+  completeGeneration,
+  pendingCount,
+  evolve,
+  DEFAULT_CONFIG,
+} from './island.ts';
 export type { Island, IslandConfig, Individual, GenerationSummary, Evaluator } from './island.ts';

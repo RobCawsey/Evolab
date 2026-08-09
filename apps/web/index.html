@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 1</title>
+    <title>Evolab — slice 3</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -16,6 +16,8 @@
         --faint: #5c5871;
         --amber: #e9a13b;
         --cyan: #4ea8c4;
+        --violet: #8b7bd8;
+        --ok: #4fb48c;
         --bad: #d9625c;
         --mono: "Cascadia Mono", "SF Mono", Consolas, monospace;
         --display: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
@@ -23,46 +25,54 @@
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
       body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: var(--display);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
+        background: var(--bg); color: var(--text); font-family: var(--display);
+        display: flex; flex-direction: column; overflow: hidden;
       }
+
       header {
-        display: flex; align-items: center; gap: 14px;
-        padding: 0 14px; height: 42px; flex: none;
+        display: flex; align-items: center; gap: 10px;
+        padding: 0 12px; height: 42px; flex: none;
         background: var(--panel); border-bottom: 1px solid var(--line);
       }
       .brand { font-weight: 600; letter-spacing: .1em; text-transform: uppercase; font-size: 12px; }
       .brand em { font-style: normal; color: var(--amber); }
-      .chip {
-        font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-        padding: 2px 7px; border-radius: 2px; border: 1px solid var(--line); color: var(--dim);
-      }
       .spacer { flex: 1; }
       .hint { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
       button {
         font-family: var(--display); font-size: 12px; letter-spacing: .02em;
         padding: 4px 11px; border-radius: 3px; border: 1px solid var(--line);
         background: var(--panel2); color: var(--text); cursor: pointer;
       }
       button:hover { border-color: var(--faint); }
+      button.pri { background: var(--amber); border-color: var(--amber); color: #17140c; font-weight: 600; }
+      button:disabled { opacity: .4; cursor: default; }
       :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
-      main { flex: 1; display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 0; }
+      .seg { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+      .seg button { border: 0; border-radius: 0; background: transparent; color: var(--dim); }
+      .seg button.on { background: var(--panel2); color: var(--amber); }
 
-      aside {
-        background: var(--panel); border-right: 1px solid var(--line);
-        overflow-y: auto; padding: 10px 12px 20px;
+      main { flex: 1; display: grid; grid-template-columns: 236px minmax(0, 1fr) 340px; min-height: 0; }
+      aside { background: var(--panel); overflow-y: auto; display: flex; flex-direction: column; }
+      aside.left { border-right: 1px solid var(--line); padding: 10px 12px 20px; }
+      aside.right { border-left: 1px solid var(--line); }
+
+      .ph {
+        display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 28px; flex: none;
+        border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px;
+        letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
       }
+      .ph em { font-style: normal; color: var(--faint); letter-spacing: 0; text-transform: none; font-size: 11px; }
+      .ph .sp { flex: 1; }
+
+      /* sliders */
       .sl-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
       .sl-head {
         font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
         color: var(--dim); padding-bottom: 3px; border-bottom: 1px solid var(--line); margin-bottom: 3px;
       }
-      .sl { display: grid; grid-template-columns: 62px 1fr 48px; align-items: center; gap: 7px; }
+      .sl { display: grid; grid-template-columns: 58px 1fr 46px; align-items: center; gap: 7px; }
       .sl-name { font-size: 12px; color: var(--dim); }
       .sl-val {
         font-family: var(--mono); font-size: 11px; font-weight: 400; text-align: right;
@@ -73,17 +83,17 @@
         width: 100%; height: 3px; border-radius: 2px; background: var(--line); outline: none;
       }
       input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none; appearance: none;
-        width: 11px; height: 11px; border-radius: 50%;
-        background: var(--text); cursor: pointer; border: none;
+        -webkit-appearance: none; appearance: none; width: 11px; height: 11px;
+        border-radius: 50%; background: var(--text); cursor: pointer; border: none;
       }
       input[type="range"]::-moz-range-thumb {
-        width: 11px; height: 11px; border-radius: 50%;
-        background: var(--text); cursor: pointer; border: none;
+        width: 11px; height: 11px; border-radius: 50%; background: var(--text); cursor: pointer; border: none;
       }
+      aside.left.locked input[type="range"] { pointer-events: none; opacity: .55; }
 
+      /* stage */
       .stage-wrap { position: relative; min-width: 0; }
-      canvas { display: block; width: 100%; height: 100%; }
+      #stage { display: block; width: 100%; height: 100%; }
       #hud {
         position: absolute; top: 12px; left: 12px;
         display: flex; flex-direction: column; gap: 4px;
@@ -91,33 +101,103 @@
         border-radius: 3px; padding: 8px 11px; pointer-events: none;
       }
       #hud div { display: flex; gap: 12px; font-family: var(--mono); font-size: 11px; }
-      #hud span { color: var(--faint); width: 66px; }
+      #hud span { color: var(--faint); width: 62px; }
       #hud b { font-weight: 400; color: var(--text); font-variant-numeric: tabular-nums; }
       #hud b.fell { color: var(--bad); }
+      .badge {
+        position: absolute; top: 12px; right: 12px;
+        font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+        padding: 3px 8px; border-radius: 2px; border: 1px solid var(--line);
+        background: rgba(14, 13, 21, .82); color: var(--dim);
+      }
+      .badge.evolved { color: var(--amber); border-color: #4a3b1f; }
+
+      /* right panel */
+      #chart { display: block; width: 100%; height: 190px; }
+      .legend {
+        display: flex; gap: 12px; padding: 6px 10px; font-family: var(--mono); font-size: 10px;
+        color: var(--faint); border-bottom: 1px solid var(--line);
+      }
+      .legend s { text-decoration: none; }
+      .stats { padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; }
+      .kv {
+        display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px;
+        color: var(--dim); font-variant-numeric: tabular-nums;
+      }
+      .kv b { color: var(--text); font-weight: 400; }
+      .kv b.am { color: var(--amber); } .kv b.ok { color: var(--ok); } .kv b.dim { color: var(--faint); }
+      .divide { height: 1px; background: var(--line); margin: 5px 0; }
+      .gauge { height: 4px; border-radius: 3px; background: var(--line); overflow: hidden; }
+      .gauge i { display: block; height: 100%; background: var(--amber); border-radius: 3px; }
+      .note { font-size: 11.5px; color: var(--faint); line-height: 1.45; padding: 2px 10px 8px; }
     </style>
   </head>
   <body>
     <header>
       <span class="brand">Evo<em>lab</em></span>
-      <span class="chip">slice 1 — it walks, badly</span>
-      <button id="btn-reset">Reset run</button>
-      <button id="btn-default">Default gait</button>
+      <button id="btn-run" class="pri">Run</button>
+      <button id="btn-reset">Reset</button>
+      <span class="seg">
+        <button id="mode-manual" class="on">Manual</button>
+        <button id="mode-evolved">Evolved</button>
+      </span>
+      <button id="btn-adopt" disabled>Copy champion to sliders</button>
       <span class="spacer"></span>
-      <span class="hint">R — reset &nbsp;·&nbsp; G — ragdoll &nbsp;·&nbsp; Space — pause &nbsp;·&nbsp; . — step</span>
+      <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode</span>
     </header>
+
     <main>
-      <aside id="sliders"></aside>
+      <aside class="left" id="sliders"></aside>
+
       <div class="stage-wrap">
         <canvas id="stage"></canvas>
         <div id="hud">
-          <div><span>sim time</span><b id="v-time">—</b></div>
+          <div><span>replay</span><b id="v-time">—</b></div>
           <div><span>distance</span><b id="v-distance">—</b></div>
           <div><span>gait phase</span><b id="v-phase">—</b></div>
           <div><span>torso y</span><b id="v-height">—</b></div>
           <div><span>state</span><b id="v-state">—</b></div>
         </div>
+        <div class="badge" id="stage-badge">manual gait</div>
       </div>
+
+      <aside class="right">
+        <div class="ph">Fitness<span class="sp"></span><em id="chart-gen">generation 0</em></div>
+        <canvas id="chart"></canvas>
+        <div class="legend">
+          <s style="color:var(--amber)">▬ best</s>
+          <s style="color:var(--cyan)">▬ mean</s>
+          <s style="color:var(--violet)">┄ diversity</s>
+        </div>
+
+        <div class="ph">Run</div>
+        <div class="stats">
+          <div class="kv"><span>generation</span><b id="s-gen">0 / 40</b></div>
+          <span class="gauge"><i id="s-progress" style="width:0%"></i></span>
+          <div class="kv"><span>best fitness</span><b class="am" id="s-best">—</b></div>
+          <div class="kv"><span>mean</span><b id="s-mean">—</b></div>
+          <div class="kv"><span>diversity</span><b id="s-div">—</b></div>
+          <div class="divide"></div>
+          <div class="kv"><span>trials</span><b id="s-trials">0</b></div>
+          <div class="kv"><span>trials / s</span><b id="s-tps">—</b></div>
+          <div class="kv"><span>gens / s</span><b id="s-gps">—</b></div>
+          <div class="kv"><span>search time</span><b id="s-elapsed">0.0 s</b></div>
+        </div>
+
+        <div class="ph">Champion</div>
+        <div class="stats">
+          <div class="kv"><span>distance</span><b class="am" id="c-dist">—</b></div>
+          <div class="kv"><span>upright</span><b id="c-upright">—</b></div>
+          <div class="kv"><span>effort</span><b id="c-effort">—</b></div>
+          <div class="kv"><span>fell</span><b id="c-fell">—</b></div>
+        </div>
+        <div class="note" id="c-note">
+          Nothing evolved yet. Tune the sliders by hand first — then press Run and watch how
+          long it takes to beat you.
+        </div>
+      </aside>
     </main>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

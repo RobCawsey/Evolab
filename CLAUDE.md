@@ -18,15 +18,23 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
-**Slice 2 — "The GA finds a gait".** A genetic algorithm searches the eleven controller
-parameters: tournament selection, SBX crossover, polynomial mutation, two elites. Console
-output only. 120 generations finds a gait walking **17.7 m in 8 s without falling**, and it
-holds up on five unseen starting tilts.
+**Slice 3 — "You can watch it".** The payoff. `npm run dev` gives a live fitness chart
+beside a replay of the current champion, with the slice-1 sliders still there so a
+hand-tuned gait and an evolved one can be compared on the same screen. Press Run.
+
+The search runs on the main thread, sliced across frames: a generation costs ~300 ms and a
+frame is 16 ms, so the loop spends 8 ms per frame evaluating and yields. `evaluatePending` +
+`completeGeneration` are the incremental pair; `stepGeneration` is both together and is what
+the CLI and the golden test use. A test asserts the two paths produce identical runs.
 
 ```bash
-npm run evolve                                  # 30 generations, 4 s trials, ~9 s
-npm run evolve -- --gens 120 --seconds 8        # the long one, ~70 s
+npm run dev                                     # the app
+npm run evolve                                  # headless, 30 generations, ~9 s
+npm run evolve -- --gens 120 --seconds 8        # the long one, ~70 s, reaches 17.7 m
 ```
+
+Note the search is driven by `requestAnimationFrame`, so a hidden tab throttles it to a
+crawl. That is browser behaviour, not a bug, and slice 4's workers remove it.
 
 Before touching the physics, read
 [the motor stiffness trap](docs/implementation.md#the-motor-stiffness-trap). A whole
@@ -34,8 +42,9 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 3 — the payoff. A live fitness chart beside a replay of the current champion,
-specified in [docs/implementation.md](docs/implementation.md#slice-3--you-can-watch-it).
+Next: slice 4 — evaluation moves into Web Workers, one island per worker, with ring
+migration. Specified in
+[docs/implementation.md](docs/implementation.md#slice-4--off-the-main-thread).
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 

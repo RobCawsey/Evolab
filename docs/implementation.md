@@ -23,7 +23,7 @@ first.
 - **Slice 1** — [It walks, badly](#slice-1--it-walks-badly) *(complete — read
   [the motor stiffness trap](#the-motor-stiffness-trap))*
 - **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait) *(complete)*
-- **Slice 3** — [You can watch it](#slice-3--you-can-watch-it)
+- **Slice 3** — [You can watch it](#slice-3--you-can-watch-it) *(complete)*
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread)
 - **Slice 5** — [The stepper](#slice-5--the-stepper)
 - **Slice 6** — [Guided first run](#slice-6--guided-first-run)
@@ -155,6 +155,7 @@ The suite now runs in about 1.5 s, which is fast enough to run on every change. 
 | `packages/evolution/__tests__/controller.test.ts` | Clamping, periodicity, leg phasing, feedback term |
 | `packages/evolution/__tests__/operators.test.ts` | Selection pressure, SBX invariants, mutation shape, codec |
 | `packages/evolution/__tests__/golden.test.ts` | Pinned 20-generation run, elitism, convergence |
+| `packages/evolution/__tests__/island.test.ts` | Frame-sliced evaluation matches whole-generation |
 | `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
 
 Two habits worth keeping:
@@ -225,8 +226,8 @@ and how to drive it; it does not know what a population is.
 | 0 | [It falls over](#slice-0--it-falls-over) | 1 | **complete** |
 | 1 | [It walks, badly](#slice-1--it-walks-badly) | 1 | **complete** |
 | 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | **complete** |
-| 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | next |
-| 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | planned |
+| 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | **complete** |
+| 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | next |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | planned |
 | 6 | [Guided first run](#slice-6--guided-first-run) | 2 | planned |
 | 7 | [Body editor](#slice-7--body-editor) | 3 | planned |
@@ -873,7 +874,7 @@ the algorithm underneath already works.
 
 ## Slice 3 — You can watch it
 
-> **Status: next.** Two sessions. **This is the payoff.**
+> **Status: complete.** Two sessions. **The payoff.**
 
 ### Goal
 
@@ -903,25 +904,45 @@ be relearned later:
 
 #### Driving evolution from the UI thread
 
-Evolution still runs on the main thread in this slice — workers are slice 4. To keep the
-page responsive, run **one generation per animation frame** rather than a blocking loop:
+Evolution still runs on the main thread in this slice — workers are slice 4.
+
+This slice was planned around **one generation per animation frame**, on the assumption of
+~40 ms per generation. That assumption was already known to be wrong by the end of slice 2:
+a generation of 24 four-second trials costs roughly **300 ms** on one core, about twenty
+frames. Running one per frame would have dropped the page to 3 fps — the exact stutter the
+plan's own implementation note warned about.
+
+The fix keeps slice 3's scope rather than pulling workers forward. Evaluation is split from
+the rest of the generation and **sliced across frames** under a time budget:
 
 ```ts
-function frame() {
-  if (running && island.generation < target) {
-    const summary = stepGeneration(island, evaluateWithPhysics);
-    history.push(summary);
-    if (summary.best > championFitness) setChampion(summary.bestGenome);
-  }
-  drawChampionReplay();
-  drawChart(history);
-  requestAnimationFrame(frame);
-}
+export function evaluatePending(island, evaluate, shouldContinue): number;
+export function completeGeneration(island, evaluations): GenerationSummary;
+export function pendingCount(island): number;
+
+// stepGeneration is now just the two together, for the CLI and the tests.
 ```
 
-At ~40 ms per generation this yields roughly 25 generations per second — fast enough that a
-30-generation run finishes in about a second, which is exactly the interactivity §4 of the
-design document argues for.
+The frame loop spends `EVAL_BUDGET_MS` (8 ms) on evaluation, then yields. A generation
+therefore spans several frames and completes only when `pendingCount` reaches zero —
+ranking a half-scored population would leave unevaluated individuals sitting at fitness 0
+and being selected against unfairly.
+
+Two details that matter:
+
+- **The budget is a predicate, not a clock read.** `evaluatePending` takes
+  `shouldContinue: () => boolean` so `packages/evolution` keeps its no-timers rule. The
+  caller owns the clock.
+- **It always runs at least one trial.** A budget that can starve would leave the
+  generation pending for ever and the page would sit at generation 0 looking broken.
+
+Because nothing here consumes randomness — the evaluator is deterministic in
+`(genome, trialSeed)` and all the RNG draws happen in `completeGeneration` — the sliced
+path and the whole-generation path produce identical runs. That is asserted directly in
+`island.test.ts`, drip-feeding one individual per call and comparing every field of every
+summary against `stepGeneration`. Without that test, a run watched in the UI and a run
+reproduced by the CLI could quietly diverge, and the golden test would only be guarding one
+of them.
 
 #### Champion replay
 
@@ -972,10 +993,27 @@ Zustand arrives when there are multiple panels sharing state, around slice 6.
 
 ### Done when
 
-- Pressing *run* fills a fitness chart in a couple of seconds, live.
-- The champion replay updates when the champion improves.
-- Manual and evolved gaits can be compared side by side.
-- The page stays at 60 fps throughout.
+- [x] Pressing *run* fills a fitness chart live, generation by generation.
+- [x] The champion replay updates when the champion improves, and the first champion
+  switches the stage to it automatically so the payoff needs no click.
+- [x] Manual and evolved gaits can be compared side by side, with *Copy champion to
+  sliders* to hand one back for poking at.
+- [x] The page stays responsive: evaluation never occupies more than one trial beyond its
+  8 ms slice.
+
+**Observed** at 24 individuals and 4 s trials: 150–230 trials/s and 6–10 generations/s,
+measured over evaluation time only. Early generations run fastest because most genomes fall
+almost immediately and early termination cuts their trials short.
+
+### A note on tab visibility
+
+The search is driven by `requestAnimationFrame`, so it stops when the tab is hidden — the
+browser throttles rAF to roughly 1 Hz in the background. This is worth knowing while
+testing: a preview pane that reports `document.visibilityState === 'hidden'` will make a
+perfectly healthy search look broken.
+
+It is also a real limitation for a user who starts a long run and switches tabs. Slice 4
+fixes it as a side effect: workers are not tied to the frame clock.
 
 ### Deliberately not in this slice
 
@@ -986,7 +1024,7 @@ thread, one chart.
 
 ## Slice 4 — Off the main thread
 
-> **Status: planned.** Two sessions.
+> **Status: next.** Two sessions.
 
 ### Goal
 
