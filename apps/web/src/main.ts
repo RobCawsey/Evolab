@@ -17,6 +17,7 @@ import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
 import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
+import { createStepper } from './ui/stepper.ts';
 import {
   activeGait, adoptChampion, createRunState, offerChampion, sampleHistory, spawnPool,
 } from './run/state.ts';
@@ -162,11 +163,20 @@ el('btn-adopt').addEventListener('click', () => {
   queueUrl();
 });
 
+/**
+ * The stepper owns its own small island rather than borrowing one from the pool: stepping
+ * needs synchronous control of a generation, and the pool's islands live in workers.
+ */
+const stepper = createStepper(morph, { seed: state.seed });
+el('btn-stepper').addEventListener('click', () => stepper.open());
+
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
+  if (stepper.isOpen) return;
   if (e.code === 'Space') { e.preventDefault(); setRunning(!state.running); }
   if (e.key === 'r' || e.key === 'R') el('btn-reset').click();
   if (e.key === 'm' || e.key === 'M') setMode(state.mode === 'manual' ? 'evolved' : 'manual');
+  if (e.key === 's' || e.key === 'S') stepper.open();
 });
 
 let urlTimer = 0;

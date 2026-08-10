@@ -34,10 +34,17 @@ export function randomGenome(length: number, rng: Rng): Genome {
  * chance of being picked. Weak pressure preserves diversity; strong pressure converges
  * fast on whatever happened to be good early.
  */
-export function tournament(fitness: readonly number[], size: number, rng: Rng): number {
+export function tournament(
+  fitness: readonly number[],
+  size: number,
+  rng: Rng,
+  drawn?: number[],
+): number {
   let best = rng.int(fitness.length);
+  drawn?.push(best);
   for (let i = 1; i < size; i++) {
     const challenger = rng.int(fitness.length);
+    drawn?.push(challenger);
     if (fitness[challenger]! > fitness[best]!) best = challenger;
   }
   return best;
@@ -62,6 +69,7 @@ export function sbx(
   rng: Rng,
   eta = SBX_ETA,
   probability = 0.9,
+  blended?: boolean[],
 ): [Genome, Genome] {
   const n = p1.length;
   const c1 = new Float32Array(n);
@@ -73,8 +81,10 @@ export function sbx(
     if (rng.float() > probability) {
       c1[i] = a;
       c2[i] = b;
+      blended?.push(false);
       continue;
     }
+    blended?.push(true);
     const u = rng.float();
     const beta = u <= 0.5
       ? Math.pow(2 * u, 1 / (eta + 1))
@@ -98,14 +108,28 @@ export function sbx(
  *
  * `rate` is per gene. The default of 1/n means about one gene changes per genome.
  */
-export function mutate(genome: Genome, rng: Rng, rate = 1 / genome.length, eta = MUTATION_ETA): Genome {
+export interface GeneChange {
+  readonly gene: number;
+  readonly from: number;
+  readonly to: number;
+}
+
+export function mutate(
+  genome: Genome,
+  rng: Rng,
+  rate = 1 / genome.length,
+  eta = MUTATION_ETA,
+  changes?: GeneChange[],
+): Genome {
   for (let i = 0; i < genome.length; i++) {
     if (rng.float() >= rate) continue;
     const u = rng.float();
     const delta = u < 0.5
       ? Math.pow(2 * u, 1 / (eta + 1)) - 1
       : 1 - Math.pow(2 * (1 - u), 1 / (eta + 1));
-    genome[i] = clamp01(genome[i]! + delta);
+    const from = genome[i]!;
+    genome[i] = clamp01(from + delta);
+    changes?.push({ gene: i, from, to: genome[i]! });
   }
   return genome;
 }

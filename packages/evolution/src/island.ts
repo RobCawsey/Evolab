@@ -9,7 +9,16 @@
 
 import { GENOME_LENGTH, type Genome } from './controller.ts';
 import { DEFAULT_OBJECTIVE, score, type Objective, type TrialResult } from './fitness.ts';
-import { diversity, mutate, randomGenome, sbx, tournament } from './operators.ts';
+import {
+  MUTATION_ETA,
+  SBX_ETA,
+  diversity,
+  mutate,
+  randomGenome,
+  sbx,
+  tournament,
+  type GeneChange,
+} from './operators.ts';
 import { Rng } from './rng.ts';
 
 export interface Individual {
@@ -134,34 +143,97 @@ export function evaluatePending(
   return evaluations;
 }
 
-/**
- * Rank the scored population, breed the next one, advance the generation counter.
- *
- * Must only be called once every individual has a result — `stepGeneration` guarantees
- * that, and the incremental caller checks `pendingCount` first. Everything that consumes
- * randomness happens here, in a fixed order, which is what makes the golden test stable
- * regardless of how evaluation was scheduled.
- */
-export function completeGeneration(island: Island, evaluations: number): GenerationSummary {
-  const { config: cfg, rng } = island;
-  const mutationRate = cfg.mutationRate ?? 1 / cfg.genomeLength;
+/* ---------------- stages ---------------- */
 
-  // --- rank ---------------------------------------------------------------------
+/**
+ * What one operator did, for the stepper to draw.
+ *
+ * These are only produced when tracing is switched on. A normal run yields nothing at all,
+ * so the worker path pays no allocation for a screen nobody is looking at.
+ */
+export interface TournamentTrace {
+  /** Population indices drawn, in order. Length is the tournament size. */
+  readonly drawn: readonly number[];
+  readonly winner: number;
+}
+
+export interface CrossoverTrace {
+  readonly parents: readonly [number, number];
+  readonly a: Genome;
+  readonly b: Genome;
+  readonly children: readonly [Genome, Genome];
+  /**
+   * Per gene: was this position blended, or copied straight from a parent?
+   *
+   * SBX interpolates gene by gene rather than splicing at a cut point, so there is no
+   * "cut" to report — an earlier draft of the plan assumed two-point crossover and asked
+   * for `cut: [number, number]`, which would have meant drawing something the algorithm
+   * does not do.
+   */
+  readonly blended: readonly boolean[];
+}
+
+export type Stage =
+  | { readonly stage: 'population'; readonly generation: number; readonly size: number; readonly pending: number }
+  | { readonly stage: 'evaluate'; readonly evaluations: number; readonly fitnesses: readonly number[]; readonly ranked: readonly number[] }
+  | { readonly stage: 'select'; readonly pair: number; readonly tournaments: readonly [TournamentTrace, TournamentTrace] }
+  | { readonly stage: 'crossover'; readonly pair: number; readonly trace: CrossoverTrace }
+  | { readonly stage: 'mutate'; readonly pair: number; readonly children: readonly Genome[]; readonly changes: readonly (readonly GeneChange[])[] }
+  | { readonly stage: 'replace'; readonly summary: GenerationSummary };
+
+export interface GenerationOptions {
+  /** Emit stages. Off by default, because a normal run has nobody watching. */
+  readonly trace?: boolean;
+}
+
+/* ---------------- the generation ---------------- */
+
+interface Ranking {
+  readonly ranked: Individual[];
+  readonly fitnesses: number[];
+  readonly summary: GenerationSummary;
+}
+
+function rankPopulation(island: Island, evaluations: number): Ranking {
   const ranked = [...island.population].sort((a, b) => b.fitness - a.fitness);
   const fitnesses = island.population.map((i) => i.fitness);
   const best = ranked[0]!;
-  const summary: GenerationSummary = {
-    generation: island.generation,
-    best: best.fitness,
-    mean: fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length,
-    worst: ranked[ranked.length - 1]!.fitness,
-    diversity: diversity(island.population.map((i) => i.genes)),
-    bestGenome: Float32Array.from(best.genes),
-    bestResult: best.result,
-    evaluations,
+  return {
+    ranked,
+    fitnesses,
+    summary: {
+      generation: island.generation,
+      best: best.fitness,
+      mean: fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length,
+      worst: ranked[ranked.length - 1]!.fitness,
+      diversity: diversity(island.population.map((i) => i.genes)),
+      bestGenome: Float32Array.from(best.genes),
+      bestResult: best.result,
+      evaluations,
+    },
   };
+}
 
-  // --- breed --------------------------------------------------------------------
+/**
+ * Select, cross and mutate until the next population is full, yielding after each operator
+ * when tracing.
+ *
+ * The order of random draws here is load-bearing and must not be rearranged. It is, per
+ * breeding pair: two tournaments, one crossover, then a mutation for each child that is
+ * actually kept. Grouping all the tournaments together and then all the crossovers — the
+ * obvious way to get three tidy phases for the UI — would change that order and silently
+ * invalidate every stored gait, and the golden test with them. Hence stepping per *pair*
+ * rather than per phase, which is also the more useful thing to watch: you follow one
+ * child from selection to birth.
+ */
+function* breed(
+  island: Island,
+  ranked: readonly Individual[],
+  fitnesses: readonly number[],
+  trace: boolean,
+): Generator<Stage, void> {
+  const { config: cfg, rng } = island;
+  const mutationRate = cfg.mutationRate ?? 1 / cfg.genomeLength;
   const next: Individual[] = [];
 
   // Elitism. Not optional: without it the best gait can be lost to an unlucky draw and
@@ -171,32 +243,130 @@ export function completeGeneration(island: Island, evaluations: number): Generat
     next.push({ genes: Float32Array.from(e.genes), fitness: e.fitness, result: e.result });
   }
 
+  let pair = 0;
   while (next.length < cfg.size) {
-    const a = island.population[tournament(fitnesses, cfg.tournamentSize, rng)]!;
-    const b = island.population[tournament(fitnesses, cfg.tournamentSize, rng)]!;
-    const [c1, c2] = sbx(a.genes, b.genes, rng, undefined, cfg.crossoverProbability);
+    const drawnA = trace ? [] : undefined;
+    const drawnB = trace ? [] : undefined;
+    const ia = tournament(fitnesses, cfg.tournamentSize, rng, drawnA);
+    const ib = tournament(fitnesses, cfg.tournamentSize, rng, drawnB);
+    const a = island.population[ia]!;
+    const b = island.population[ib]!;
+    if (trace) {
+      yield {
+        stage: 'select',
+        pair,
+        tournaments: [
+          { drawn: drawnA!, winner: ia },
+          { drawn: drawnB!, winner: ib },
+        ],
+      };
+    }
+
+    const blended = trace ? [] : undefined;
+    const [c1, c2] = sbx(a.genes, b.genes, rng, SBX_ETA, cfg.crossoverProbability, blended);
+    if (trace) {
+      yield {
+        stage: 'crossover',
+        pair,
+        trace: {
+          parents: [ia, ib],
+          a: Float32Array.from(a.genes),
+          b: Float32Array.from(b.genes),
+          children: [Float32Array.from(c1), Float32Array.from(c2)],
+          blended: blended!,
+        },
+      };
+    }
+
+    const kept: Genome[] = [];
+    const changes: GeneChange[][] = [];
     for (const child of [c1, c2]) {
+      // The population can fill on the first child, in which case the second is discarded
+      // *before* being mutated and consumes no randomness. Preserving that is part of
+      // preserving the draw order.
       if (next.length >= cfg.size) break;
-      mutate(child, rng, mutationRate);
+      const record = trace ? [] : undefined;
+      mutate(child, rng, mutationRate, MUTATION_ETA, record);
+      if (trace) {
+        kept.push(Float32Array.from(child));
+        changes.push(record!);
+      }
       next.push({ genes: child, fitness: 0, result: null });
     }
+    if (trace) yield { stage: 'mutate', pair, children: kept, changes };
+
+    pair++;
   }
 
   island.population = next;
   island.generation++;
+}
+
+/**
+ * One generation as a generator, yielding at each operator boundary.
+ *
+ * This is the single implementation of a generation. Running normally drains it; the
+ * stepper advances it one `next()` at a time. One code path, two speeds — which is why the
+ * teaching screen shows the real algorithm rather than an illustration of it.
+ *
+ * A caller that abandons the generator part-way leaves the island half-bred. Drain it or
+ * discard the island.
+ */
+export function* generation(
+  island: Island,
+  evaluate: Evaluator,
+  opts: GenerationOptions = {},
+): Generator<Stage, GenerationSummary> {
+  const trace = opts.trace ?? false;
+
+  if (trace) {
+    yield {
+      stage: 'population',
+      generation: island.generation,
+      size: island.population.length,
+      pending: pendingCount(island),
+    };
+  }
+
+  const evaluations = evaluatePending(island, evaluate);
+  const { ranked, fitnesses, summary } = rankPopulation(island, evaluations);
+
+  if (trace) {
+    const order = island.population
+      .map((_, index) => index)
+      .sort((x, y) => fitnesses[y]! - fitnesses[x]!);
+    yield { stage: 'evaluate', evaluations, fitnesses, ranked: order };
+  }
+
+  yield* breed(island, ranked, fitnesses, trace);
+
+  if (trace) yield { stage: 'replace', summary };
+  return summary;
+}
+
+/**
+ * Rank the scored population, breed the next one, advance the generation counter.
+ *
+ * The non-generator half of a generation, for the incremental caller that has already run
+ * `evaluatePending` itself. Shares `breed`, so it cannot drift from the stepper.
+ */
+export function completeGeneration(island: Island, evaluations: number): GenerationSummary {
+  const { ranked, fitnesses, summary } = rankPopulation(island, evaluations);
+  const it = breed(island, ranked, fitnesses, false);
+  while (!it.next().done) { /* nothing to observe */ }
   return summary;
 }
 
 /**
  * Evaluate, select, breed, replace. One whole generation, returned as a summary.
  *
- * The all-at-once form, used by the CLI and the tests. The browser drives
- * `evaluatePending` and `completeGeneration` separately so it can yield to the frame,
- * but the sequence of random draws is identical either way.
+ * The all-at-once form, used by the workers, the CLI and the tests.
  */
 export function stepGeneration(island: Island, evaluate: Evaluator): GenerationSummary {
-  const evaluations = evaluatePending(island, evaluate);
-  return completeGeneration(island, evaluations);
+  const it = generation(island, evaluate);
+  let step = it.next();
+  while (!step.done) step = it.next();
+  return step.value;
 }
 
 /* ---------------- migration ---------------- */

@@ -160,6 +160,21 @@ export type Genome = Float32Array;
 
 export const GENOME_LENGTH = 11;
 
+/**
+ * Human names for each gene, in genome order.
+ *
+ * Exported rather than written into the UI so the labels cannot drift from the layout —
+ * and because being able to point at a cell and say what it does is the entire argument
+ * for choosing this encoding (§3 of the design document).
+ */
+export const GENE_NAMES: readonly string[] = [
+  'frequency',
+  'balance gain',
+  'hip amplitude', 'hip phase', 'hip centre',
+  'knee amplitude', 'knee phase', 'knee centre',
+  'ankle amplitude', 'ankle phase', 'ankle centre',
+];
+
 /** Gene index -> parameter range, in genome order. The single source of truth for decode. */
 const GENE_RANGES: readonly (readonly [number, number])[] = [
   GAIT_RANGES.frequency,

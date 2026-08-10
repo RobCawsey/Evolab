@@ -10,6 +10,7 @@ export {
   decodeGenome,
   encodeGenome,
   GAIT_RANGES,
+  GENE_NAMES,
   GENOME_LENGTH,
   JOINT_KINDS,
   PITCH_LEAD,
@@ -26,12 +27,14 @@ export {
   SBX_ETA,
   MUTATION_ETA,
 } from './operators.ts';
+export type { GeneChange } from './operators.ts';
 
 export { score, DEFAULT_OBJECTIVE } from './fitness.ts';
 export type { TrialResult, Objective, FitnessBreakdown } from './fitness.ts';
 
 export {
   createIsland,
+  generation,
   stepGeneration,
   evaluatePending,
   completeGeneration,
@@ -41,4 +44,7 @@ export {
   evolve,
   DEFAULT_CONFIG,
 } from './island.ts';
-export type { Island, IslandConfig, Individual, GenerationSummary, Evaluator } from './island.ts';
+export type {
+  Island, IslandConfig, Individual, GenerationSummary, Evaluator,
+  Stage, GenerationOptions, TournamentTrace, CrossoverTrace,
+} from './island.ts';

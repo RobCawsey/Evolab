@@ -25,7 +25,7 @@ first.
 - **Slice 2** — [The GA finds a gait](#slice-2--the-ga-finds-a-gait) *(complete)*
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it) *(complete)*
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread) *(complete)*
-- **Slice 5** — [The stepper](#slice-5--the-stepper)
+- **Slice 5** — [The stepper](#slice-5--the-stepper) *(complete)*
 - **Slice 6** — [Guided first run](#slice-6--guided-first-run)
 - **Slice 7** — [Body editor](#slice-7--body-editor)
 - **Slice 8** — [Behaviour archive](#slice-8--behaviour-archive)
@@ -155,7 +155,7 @@ The suite now runs in about 1.5 s, which is fast enough to run on every change. 
 | `packages/evolution/__tests__/controller.test.ts` | Clamping, periodicity, leg phasing, feedback term |
 | `packages/evolution/__tests__/operators.test.ts` | Selection pressure, SBX invariants, mutation shape, codec |
 | `packages/evolution/__tests__/golden.test.ts` | Pinned 20-generation run, elitism, convergence |
-| `packages/evolution/__tests__/island.test.ts` | Frame-sliced evaluation matches whole-generation |
+| `packages/evolution/__tests__/island.test.ts` | Frame-sliced evaluation, generator stage order, traced == untraced |
 | `packages/evolution/__tests__/migration.test.ts` | Emigrant copying, immigrant placement, half-population cap |
 | `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
 
@@ -229,8 +229,8 @@ and how to drive it; it does not know what a population is.
 | 2 | [The GA finds a gait](#slice-2--the-ga-finds-a-gait) | 2 | **complete** |
 | 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | **complete** |
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | **complete** |
-| 5 | [The stepper](#slice-5--the-stepper) | 3 | next |
-| 6 | [Guided first run](#slice-6--guided-first-run) | 2 | planned |
+| 5 | [The stepper](#slice-5--the-stepper) | 3 | **complete** |
+| 6 | [Guided first run](#slice-6--guided-first-run) | 2 | next |
 | 7 | [Body editor](#slice-7--body-editor) | 3 | planned |
 | 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | planned |
 | 9 | 3D replay | 3 | sketch |
@@ -1175,7 +1175,7 @@ in the design document is cut — see §2 of that document for why.
 
 ## Slice 5 — The stepper
 
-> **Status: next.** Three sessions.
+> **Status: complete.** Three sessions.
 
 ### Goal
 
@@ -1217,27 +1217,93 @@ Gene strips: a genome drawn as *n* coloured cells. Provenance colours during cro
 
 ### Files
 
-- `packages/evolution/src/island.ts` — convert to a generator
-- `apps/web/src/ui/stepper.ts`, `apps/web/src/render/genes.ts` — new
+- `packages/evolution/src/island.ts` — restructured around the generator
+- `packages/evolution/src/operators.ts` — optional trace sinks
+- `apps/web/src/ui/stepper.ts`, `apps/web/src/ui/explanations.ts` — new
+- `apps/web/src/render/genes.ts` — new
 
-### Implementation notes
+### The refactor, and the constraint that shaped it
 
-- Converting to a generator is a **behaviour-preserving refactor**. The golden test must
-  pass before and after, unchanged. If it does not, the conversion changed the order of RNG
-  draws — which is exactly the kind of bug the golden test exists to catch.
-- Explanations are data keyed by stage id, not strings in the view (§7 of the design
-  document).
+Converting to a generator is behaviour-preserving or it is nothing. The golden test passed
+untouched before and after, and `npm run evolve` returns the same champion fitness of
+6.4598 it did in slice 4 — which is the real proof, since it exercises the physics path too.
+
+The constraint that dictated the design is the **order of random draws**. Per breeding pair
+the algorithm does: two tournaments, one crossover, then a mutation for each child actually
+kept. The obvious way to give the UI three tidy phases is to do all the tournaments, then
+all the crossovers, then all the mutations — and that reorders every draw from the second
+pair onward, silently invalidating every stored gait.
+
+So the generator yields **per pair**, cycling `select → crossover → mutate`, rather than per
+phase. That preserves the order exactly and is the better teaching object anyway: you follow
+one child from selection to birth instead of watching an operator applied twenty-two times.
+
+One subtlety worth keeping: when the population fills on the first child, the second is
+discarded *before* being mutated and consumes no randomness. Preserving that is part of
+preserving the order.
+
+### Tracing must not perturb anything
+
+Operators take optional sinks — `tournament(..., drawn?)`, `sbx(..., blended?)`,
+`mutate(..., changes?)` — that record what happened without consuming randomness. Tracing
+is off by default, so the worker path allocates nothing for a screen nobody is looking at.
+
+`island.test.ts` asserts a traced run and an untraced run produce identical populations, ten
+generations deep. Without that, the algorithm on the teaching screen could drift from the
+one that actually runs, and the screen would become a lie in exactly the way that is hardest
+to notice.
+
+### Structure
+
+```
+generation(island, evaluate, { trace })   the single implementation, a generator
+  -> stepGeneration(island, evaluate)     drain it; workers, CLI, tests
+  -> completeGeneration(island, n)        shares breed() with it; incremental callers
+```
+
+`breed` is shared, so the stepper and the fast path cannot diverge by construction rather
+than by discipline.
+
+### What SBX actually does
+
+The plan's `Stage` type asked for `crossover: { cut: [number, number] }`. That assumes
+two-point crossover. SBX interpolates gene by gene and has no cut point, so the trace
+reports per-gene provenance instead: **blended**, or **copied straight through** from one
+parent. Drawing a cut would have meant drawing something the algorithm does not do.
+
+That turns out to be the more interesting picture. In the screen shown, ten of eleven genes
+were blended and one was copied — and the copied gene appears violet in child 1 and cyan in
+child 2, at the same position, which makes the two-children-from-two-parents structure
+visible at a glance.
 
 ### Done when
 
-Stepping forward through one generation shows every operator acting on real values, the
-golden test is untouched, and running normally still produces identical results.
+- [x] Stepping through one generation shows every operator acting on real values.
+- [x] The golden test is untouched and passes.
+- [x] Running normally produces identical results — `npm run evolve` still returns 6.4598.
+
+**Observed.** The teaching lands harder than expected in two places, both accidents of a
+real run rather than anything designed:
+
+- The **evaluate** stage on generation 0 shows one genome at 0.254 and every other at
+  0.000. "Most early genomes score near zero because they fall immediately" is not a claim
+  the learner has to take on trust.
+- A **select** stage drew three individuals all at fitness 0.000, so the winner was decided
+  purely by draw order. That is selection pressure being visibly weak, which is the point
+  of the stage and very hard to assert in prose.
+
+### Deliberately not in this slice
+
+No stepping backwards, no editing a genome mid-generation, no replaying an individual from
+the stepper. The stage list is not clickable — stepping is forward-only, because a
+generator cannot rewind and faking it would mean keeping a second copy of the algorithm's
+state, which is the thing this slice exists to avoid.
 
 ---
 
 ## Slice 6 — Guided first run
 
-> **Status: planned.** Two sessions.
+> **Status: next.** Two sessions.
 
 ### Goal
 

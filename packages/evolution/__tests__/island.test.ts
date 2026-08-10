@@ -3,6 +3,7 @@ import {
   completeGeneration,
   createIsland,
   evaluatePending,
+  generation,
   pendingCount,
   stepGeneration,
   type Genome,
@@ -86,5 +87,110 @@ describe('incremental evaluation', () => {
     const island = createIsland(0, 1);
     evaluatePending(island, fakeEvaluate);
     expect(evaluatePending(island, fakeEvaluate)).toBe(0);
+  });
+});
+
+describe('generation as a generator', () => {
+  it('produces the same run whether traced or not', () => {
+    // The stepper watches a traced generation; the workers drain an untraced one. If
+    // tracing perturbed the search by so much as one random draw, the algorithm on the
+    // teaching screen would not be the algorithm that actually runs — which would make the
+    // whole screen a lie.
+    const plain = createIsland(0, 4417);
+    const traced = createIsland(0, 4417);
+
+    for (let g = 0; g < 10; g++) {
+      const a = stepGeneration(plain, fakeEvaluate);
+
+      const it = generation(traced, fakeEvaluate, { trace: true });
+      let step = it.next();
+      while (!step.done) step = it.next();
+      const b = step.value;
+
+      expect(b.best).toBe(a.best);
+      expect(b.mean).toBe(a.mean);
+      expect(b.diversity).toBe(a.diversity);
+      expect(Array.from(b.bestGenome)).toEqual(Array.from(a.bestGenome));
+    }
+    expect(traced.population.map((i) => Array.from(i.genes)))
+      .toEqual(plain.population.map((i) => Array.from(i.genes)));
+  });
+
+  it('yields nothing at all when not tracing', () => {
+    // The fast path has to stay allocation-free. A stray yield here would cost the worker
+    // an object per operator, millions of times per run.
+    const island = createIsland(0, 1);
+    const it = generation(island, fakeEvaluate);
+    expect(it.next().done).toBe(true);
+  });
+
+  it('walks the operators in the order the algorithm applies them', () => {
+    const island = createIsland(0, 4417, { size: 8, elites: 2 });
+    const stages = [...generation(island, fakeEvaluate, { trace: true })].map((s) => s.stage);
+
+    expect(stages[0]).toBe('population');
+    expect(stages[1]).toBe('evaluate');
+    expect(stages[stages.length - 1]).toBe('replace');
+
+    // Between those, breeding repeats select -> crossover -> mutate per pair. Grouping the
+    // phases instead would have changed the order of random draws; see `breed`.
+    const middle = stages.slice(2, -1);
+    expect(middle.length % 3).toBe(0);
+    for (let i = 0; i < middle.length; i += 3) {
+      expect([middle[i], middle[i + 1], middle[i + 2]]).toEqual(['select', 'crossover', 'mutate']);
+    }
+    // 8 individuals minus 2 elites = 6 children = 3 pairs.
+    expect(middle.length / 3).toBe(3);
+  });
+
+  it('reports selections that actually happened', () => {
+    const island = createIsland(0, 4417, { size: 8, tournamentSize: 3 });
+    const stages = [...generation(island, fakeEvaluate, { trace: true })];
+    const select = stages.find((s) => s.stage === 'select');
+    expect(select).toBeDefined();
+    if (select?.stage !== 'select') throw new Error('unreachable');
+
+    for (const t of select.tournaments) {
+      expect(t.drawn).toHaveLength(3);
+      expect(t.drawn).toContain(t.winner);
+      for (const index of t.drawn) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(8);
+      }
+    }
+  });
+
+  it('reports crossover provenance per gene', () => {
+    const island = createIsland(0, 4417, { size: 8 });
+    const stages = [...generation(island, fakeEvaluate, { trace: true })];
+    const cross = stages.find((s) => s.stage === 'crossover');
+    if (cross?.stage !== 'crossover') throw new Error('expected a crossover stage');
+
+    expect(cross.trace.blended).toHaveLength(cross.trace.a.length);
+    // Where a gene was not blended, the children are exact copies of their parents.
+    cross.trace.blended.forEach((wasBlended, i) => {
+      if (!wasBlended) {
+        expect(cross.trace.children[0]![i]).toBe(cross.trace.a[i]);
+        expect(cross.trace.children[1]![i]).toBe(cross.trace.b[i]);
+      }
+    });
+  });
+
+  it('reports mutations that match the genes they changed', () => {
+    const island = createIsland(0, 4417, { size: 12, mutationRate: 1 });
+    const stages = [...generation(island, fakeEvaluate, { trace: true })];
+    const mutations = stages.filter((s) => s.stage === 'mutate');
+    expect(mutations.length).toBeGreaterThan(0);
+
+    for (const stage of mutations) {
+      if (stage.stage !== 'mutate') continue;
+      stage.changes.forEach((changes, child) => {
+        for (const c of changes) {
+          expect(c.to).toBe(stage.children[child]![c.gene]);
+          expect(c.to).toBeGreaterThanOrEqual(0);
+          expect(c.to).toBeLessThanOrEqual(1);
+        }
+      });
+    }
   });
 });

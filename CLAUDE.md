@@ -18,10 +18,24 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
-**Slice 4 — "Off the main thread".** The search runs in Web Workers, one island each,
-trading two elites round a ring every five generations. The UI thread does no physics at
-all beyond the champion replay. Measured 88 trials/s on one worker and 329 on four —
-**3.7× on four cores** — and a 40-generation run finishes in about 11 seconds.
+**Slice 5 — "The stepper".** The teaching screen. *Show me how this works →* in the
+toolbar, or `S`, opens a full-screen stepper that pauses the algorithm between operators
+and shows each one acting on real genomes — gene strips, tournament draws, crossover
+provenance, mutations with the gene named and the delta shown.
+
+It drives `generation(island, evaluate, { trace: true })`, the same function the workers
+drain at full speed. **Not an illustration of the algorithm — the algorithm, paused.**
+A test asserts traced and untraced runs are identical, because the moment that stops being
+true the screen becomes a lie.
+
+The generator yields **per breeding pair** (`select → crossover → mutate`), never per
+phase. Grouping the phases would reorder the random draws and silently invalidate every
+stored gait. If you touch `breed()`, the golden test and `npm run evolve` returning 6.4598
+are what tell you the order survived.
+
+Behind it, the search still runs in Web Workers, one island each, trading two elites round
+a ring every five generations — 88 trials/s on one worker and 329 on four, **3.7× on four
+cores**, with a 40-generation run in about 11 seconds.
 
 ```bash
 npm run dev                                     # the app; ?workers=1 to compare
@@ -45,12 +59,8 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 5 — the generation stepper, the teaching screen. Specified in
-[docs/implementation.md](docs/implementation.md#slice-5--the-stepper). Note its key idea:
-convert `stepGeneration` into a generator that yields at each operator boundary, so normal
-running and single-stepping drive the same code rather than two implementations. That
-conversion must leave the golden test passing untouched — if it does not, the order of RNG
-draws moved.
+Next: slice 6 — the guided first run, where React finally arrives. Specified in
+[docs/implementation.md](docs/implementation.md#slice-6--guided-first-run).
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 
