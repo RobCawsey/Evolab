@@ -7,10 +7,13 @@
  */
 
 import {
+  DEFAULT_SPEC,
+  buildBiped,
+  clampSpec,
   defaultGait,
   gaitPhase,
-  simpleBiped,
   Rng,
+  type BipedSpec,
   type GaitParams,
 } from '@evolab/evolution';
 import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
@@ -19,6 +22,7 @@ import { drawChart } from './render/chart.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createGuided } from './ui/guided.ts';
+import { createEditor, decodeSpec, encodeSpec } from './ui/editor.ts';
 import { presetByKey, type Preset } from './run/objectives.ts';
 import {
   activeGait, adoptChampion, createRunState, offerChampion, offerFirst, sampleHistory,
@@ -53,7 +57,14 @@ const champ = {
   fell: el('c-fell'), note: el('c-note'),
 };
 
-const morph = simpleBiped();
+/**
+ * The body is mutable from slice 7 on. Changing it rebuilds the replay immediately — you
+ * watch the champion gait on the new legs as you drag — but leaves the pool alone until the
+ * next run, because every fitness in it was measured against the old body.
+ */
+let spec: BipedSpec = DEFAULT_SPEC;
+let morph = buildBiped(spec);
+let poolStale = false;
 
 /* ---------------- settings from the URL ---------------- */
 
@@ -62,6 +73,12 @@ const num = (key: string, fallback: number) => {
   const v = Number(params.get(key));
   return params.has(key) && Number.isFinite(v) ? v : fallback;
 };
+
+const specParam = params.get('body');
+if (specParam) {
+  spec = clampSpec(decodeSpec(specParam, DEFAULT_SPEC));
+  morph = buildBiped(spec);
+}
 
 const gaitParam = params.get('gait');
 const workersParam = params.has('workers') ? Math.max(1, num('workers', 1)) : undefined;
@@ -84,6 +101,7 @@ const state = createRunState({
  * Rapier instance — so this happens at start-up rather than on the first press of Run.
  */
 function startPool(): void {
+  poolStale = false;
   el('btn-run').setAttribute('disabled', '');
   spawnPool(state, morph, {
     onReady: () => {
@@ -162,6 +180,12 @@ function setStage(next: AppStage): void {
 }
 
 function setRunning(running: boolean): void {
+  if (running && poolStale) {
+    // The body changed since the last run. Scores from the old one are meaningless now.
+    stepper.retarget(morph);
+    startPool();
+    return;
+  }
   const pool = state.pool;
   if (!pool || !pool.ready) return;
   state.running = running && pool.generation < state.target;
@@ -202,6 +226,33 @@ for (const s of ['guided', 'explorer', 'lab'] as const) {
  */
 const stepper = createStepper(morph, { seed: state.seed });
 el('btn-stepper').addEventListener('click', () => stepper.open());
+
+const editor = createEditor(el('editor'), {
+  onChange(next) {
+    spec = next;
+    morph = buildBiped(spec);
+    // The replay is cheap to rebuild, so the champion appears on the new body as you drag.
+    // The pool is not: every score in it was measured on the old body, so it is marked
+    // stale and rebuilt on the next run rather than thrown away mid-drag.
+    poolStale = true;
+    respawn();
+    editor.update(spec, state.champion !== null);
+    queueUrl();
+  },
+  onReset() {
+    spec = DEFAULT_SPEC;
+    morph = buildBiped(spec);
+    poolStale = true;
+    respawn();
+    stepper.retarget(morph);
+    editor.update(spec, state.champion !== null);
+    queueUrl();
+  },
+  onRetest() {
+    stepper.retarget(morph);
+    setMode('evolved');
+  },
+});
 
 const guided = createGuided(el('guided'), {
   // Changing the goal changes what every island is scoring against, and islands take their
@@ -246,6 +297,7 @@ function queueUrl(): void {
     if (state.mode === 'evolved') q.set('mode', 'evolved');
     q.set('stage', state.stage);
     q.set('goal', state.preset.key);
+    if (encodeSpec(spec) !== encodeSpec(DEFAULT_SPEC)) q.set('body', encodeSpec(spec));
     history.replaceState(null, '', `?${q.toString()}`);
   }, 250);
 }
@@ -342,6 +394,7 @@ function paintStats(): void {
   paintIslands();
 
   const r = state.champion ? state.champion.summary.bestResult : null;
+  editor.update(spec, state.champion !== null);
   guided.update({
     championDistance: state.champion?.summary.bestResult?.distance ?? null,
     firstDistance: state.firstChampion?.summary.bestResult?.distance ?? null,

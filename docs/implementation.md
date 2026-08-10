@@ -27,7 +27,7 @@ first.
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread) *(complete)*
 - **Slice 5** — [The stepper](#slice-5--the-stepper) *(complete)*
 - **Slice 6** — [Guided first run](#slice-6--guided-first-run) *(complete)*
-- **Slice 7** — [Body editor](#slice-7--body-editor)
+- **Slice 7** — [Body editor](#slice-7--body-editor) *(complete)*
 - **Slice 8** — [Behaviour archive](#slice-8--behaviour-archive)
 - **Slices 9–14** — [Later stages](#slices-914--later-stages)
 - [Appendix A — Rapier notes](#appendix-a--rapier-notes)
@@ -157,6 +157,7 @@ The suite now runs in about 1.5 s, which is fast enough to run on every change. 
 | `packages/evolution/__tests__/golden.test.ts` | Pinned 20-generation run, elitism, convergence |
 | `packages/evolution/__tests__/island.test.ts` | Frame-sliced evaluation, generator stage order, traced == untraced |
 | `packages/evolution/__tests__/migration.test.ts` | Emigrant copying, immigrant placement, half-population cap |
+| `packages/evolution/__tests__/spec.test.ts` | Chain closure for any spec, fixed topology, validation |
 | `packages/sim/__tests__/world.test.ts` | Determinism, joint limits, motor authority, walking |
 
 Two habits worth keeping:
@@ -231,8 +232,8 @@ and how to drive it; it does not know what a population is.
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | **complete** |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | **complete** |
 | 6 | [Guided first run](#slice-6--guided-first-run) | 2 | **complete** |
-| 7 | [Body editor](#slice-7--body-editor) | 3 | next |
-| 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | planned |
+| 7 | [Body editor](#slice-7--body-editor) | 3 | **complete** |
+| 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | next |
 | 9 | 3D replay | 3 | sketch |
 | 10 | Gait analysis | 2 | sketch |
 | 11 | Challenge track | 3 | sketch |
@@ -1390,33 +1391,117 @@ those are slice 11. The stage a user is in survives in the URL and nowhere else.
 
 ## Slice 7 — Body editor
 
-> **Status: next.** Three sessions. **React and Zustand arrive here** — see the slice 6
-> notes for why they did not arrive earlier.
+> **Status: complete.** Three sessions.
 
 ### Goal
 
 The morphology designer of Fig 9.3: edit segments and joints in a 2D sagittal view, with
 live mass and torque readouts.
 
-### Design sketch
+### Design
 
-`Morphology` becomes user data rather than a constant — persisted to IndexedDB, versioned,
-and **immutable once a run references it** (§11 of the design document). Editing a
-referenced morphology forks a revision.
+The editor edits a **`BipedSpec`** — lengths, widths, limits, torques, density — and
+`buildBiped(spec)` derives the morphology from it, stacking upward from the ground.
 
-Direct manipulation on the existing canvas: drag a joint to move it, drag a segment edge to
-resize. Symmetry lock mirrors edits across the sagittal plane by default. Validation runs
-on every edit: closed kinematic chain, non-degenerate limits, mass within bounds.
+That choice does most of the work:
 
-Note that changing the morphology changes the genome length whenever the joint count
-changes — genomes are not portable across morphologies, and the UI must say so rather than
-silently producing nonsense.
+- **The kinematic chain closes by construction.** Positions and joint anchors are computed
+  from the same lengths, so there is no way to produce a body whose joints tear themselves
+  together on the first step. The morphology test asserting anchor agreement can now only
+  fail from a bug in `buildBiped`, never from a user edit, and `spec.test.ts` asserts it
+  across 300 random specs.
+- **The feet always rest exactly on y = 0**, so no body is born interpenetrating the floor.
+- **Symmetry is not a lock, it is the type.** One spec describes both legs, so the two can
+  never drift apart.
+
+`simpleBiped()` is now `buildBiped(DEFAULT_SPEC)` and reproduces the slice-0 numbers
+exactly — the mass guard, the chain-closure test, the physics walking test and
+`npm run evolve` returning 6.4598 all pass untouched.
+
+### The topology is fixed, and that is the interesting part
+
+Seven segments, six joints, always. That is a real limitation, and it buys something worth
+more than it costs: **the genome stays eleven genes whatever the body**, so a gait evolved
+on one biped can be dropped straight onto another.
+
+The plan anticipated the opposite — "changing the morphology changes the genome length
+whenever the joint count changes… the UI must say so rather than silently producing
+nonsense." Fixing the topology removes that failure mode entirely, and replaces it with the
+best interaction in the editor: evolve a gait, lengthen the legs, watch it fall over.
+Nothing else in the project makes the relationship between body and controller so obvious
+so quickly. A variable-topology editor would have made it impossible.
+
+### Validation is about whether a body can work
+
+Structural coherence is guaranteed, so `validateBody` only reports things that would waste
+the user's next eight seconds:
+
+| Check | Level |
+|---|---|
+| Centre of mass outside the support polygon | error — it topples before it can step |
+| Balance margin under 15 mm | warning |
+| Hip torque below what holding the torso needs | error |
+| Hip load over 70 % | warning |
+| Joint limits that exclude the rest pose, or are degenerate | error |
+
+The hip-load check is the one worth having: it is the same class of mistake as slice 1's
+motor gains, caught before it costs a diagnostic session.
+
+### What changing the body does and does not restart
+
+Dragging a slider rebuilds the morphology and the **replay** immediately, so the champion
+gait is re-run on the new legs as you drag. It does **not** rebuild the worker pool: every
+fitness in it was measured against the old body, so the pool is marked stale and rebuilt on
+the next Run. Rebuilding four workers on every slider tick would be unusable.
+
+The stepper holds its own island and gets `retarget(morph)`, which discards the generation
+in progress rather than comparing scores from two different robots.
+
+### React, finally answered
+
+The plan said React and Zustand arrive here. Having built the editor, they do not, and I am
+closing the question rather than deferring it a third time.
+
+The editor is a column of sliders, a readout block and a list of validation messages — the
+same shape as the gait panel that has worked since slice 1. The three heaviest surfaces in
+the app are canvases driven by `requestAnimationFrame`, which is precisely where React state
+is the wrong tool. Porting roughly 1,400 lines of working, tested UI would buy component
+syntax and cost a large refactor across six finished slices.
+
+**This is an amendment to §12 of the design document, not an oversight.** The stack row
+should read vanilla TypeScript with canvas rendering. If a future slice needs a third-party
+React component or genuine component reuse, that is the moment to revisit — slice 9's
+Three.js work does not qualify, since plain Three.js is a perfectly good imperative API.
+
+### Done when
+
+- [x] The body is editable, with live mass, height, balance margin and hip load.
+- [x] Invalid bodies are explained rather than merely rejected.
+- [x] A body round-trips through the URL, so one can be shared.
+- [x] The reference body is unchanged — 130 tests pass, `npm run evolve` still returns 6.4598.
+
+**Observed.** The reference biped is 21.1 kg, 0.92 m, 53 mm of balance margin, 12 % hip
+load. Lengthening both leg segments to 0.42 m gives a 28.0 kg, 1.25 m body. Shrinking the
+foot to 0.08 m while pushing the ankle offset to 0.12 m gives a margin of −74 mm and the
+error "the centre of mass is outside the feet"; the biped visibly topples in the replay.
+
+### Deliberately not in this slice
+
+No IndexedDB, no revisions, no fork-on-edit — the URL is the only persistence, which is
+enough for a project with one user and makes bodies shareable for free. §11's immutability
+rule matters when runs are stored; nothing is stored yet.
+
+No drag-on-canvas manipulation. Sliders with live readouts and a live replay give the same
+feedback loop, and hit-testing rotated segments is a session of work for a nicer verb.
+
+No per-leg asymmetry, no extra limbs, no variable topology — see above for why the last one
+is a feature.
 
 ---
 
 ## Slice 8 — Behaviour archive
 
-> **Status: planned.** Two sessions.
+> **Status: next.** Two sessions.
 
 ### Goal
 

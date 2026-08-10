@@ -1,6 +1,14 @@
 export { Rng } from './rng.ts';
-export { simpleBiped } from './morphology.ts';
-export type { Morphology, Segment, Joint } from './morphology.ts';
+export {
+  simpleBiped,
+  buildBiped,
+  clampSpec,
+  bodyStats,
+  validateBody,
+  DEFAULT_SPEC,
+  SPEC_RANGES,
+} from './morphology.ts';
+export type { Morphology, Segment, Joint, BipedSpec, BodyStats, Issue } from './morphology.ts';
 
 export {
   gaitTargets,

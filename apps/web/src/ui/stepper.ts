@@ -34,15 +34,18 @@ export interface StepperOptions {
 export interface Stepper {
   open(): void;
   close(): void;
+  /** Point the stepper at a different body. Discards the generation in progress. */
+  retarget(morph: Morphology): void;
   readonly isOpen: boolean;
 }
 
-export function createStepper(morph: Morphology, opts: StepperOptions = {}): Stepper {
+export function createStepper(initialMorph: Morphology, opts: StepperOptions = {}): Stepper {
   const population = opts.population ?? 12;
   const trialSeconds = opts.trialSeconds ?? 3;
   const seed = opts.seed ?? 4417;
 
-  const evaluate = makeEvaluator(morph, { seconds: trialSeconds });
+  let morph = initialMorph;
+  let evaluate = makeEvaluator(morph, { seconds: trialSeconds });
   let island: Island = createIsland(0, seed, { size: population, trialSeconds });
   let iterator = generation(island, evaluate, { trace: true });
   let current: Stage | null = null;
@@ -369,6 +372,13 @@ export function createStepper(morph: Morphology, opts: StepperOptions = {}): Ste
     close(): void {
       open = false;
       root.hidden = true;
+    },
+    retarget(next: Morphology): void {
+      // A generation half-evaluated against the old body would be comparing scores from two
+      // different robots, so the island starts again rather than carrying anything over.
+      morph = next;
+      evaluate = makeEvaluator(morph, { seconds: trialSeconds });
+      reset();
     },
     get isOpen(): boolean {
       return open;

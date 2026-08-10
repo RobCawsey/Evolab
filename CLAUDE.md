@@ -18,6 +18,27 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 7 — "Body editor".** In Lab, the biped is editable: segment lengths and widths,
+foot geometry, density, with live mass, height, balance margin and hip load, and validation
+that explains *why* a body cannot work rather than just refusing it. Bodies round-trip
+through `?body=`.
+
+The editor edits a **`BipedSpec`** and `buildBiped(spec)` derives the morphology, so the
+kinematic chain closes by construction and the feet always rest exactly on y = 0. Symmetry
+is not a lock, it is the type — one spec describes both legs.
+
+**The topology is fixed at six joints on purpose.** That keeps the genome at eleven genes
+whatever the body, so an evolved gait can be dropped onto a different set of legs. Evolve a
+gait, lengthen the legs, watch it fall over — nothing else in the project makes the coupling
+between body and controller so obvious so fast.
+
+Changing the body rebuilds the replay immediately but only marks the worker pool stale;
+every fitness in it was measured on the old body, and rebuilding four workers per slider
+tick would be unusable.
+
+**React is not in this project, and that is now a decision rather than a deferral** — an
+amendment to §12 of the design document, reasoned in the slice 7 notes.
+
 **Slice 6 — "Guided first run".** The app opens in a guided flow: pick a body, choose a
 goal, watch 24 robots evolve, see what changed. No sliders, four preset goals, and step 4
 replays the first attempt against the champion. About 2,600 robots in 8 seconds, typically
@@ -77,9 +98,9 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 7 — the body editor, and the first slice that genuinely earns React and
-Zustand. Specified in
-[docs/implementation.md](docs/implementation.md#slice-7--body-editor).
+Next: slice 8 — the MAP-Elites behaviour archive, and a natural stopping point for the
+project. Specified in
+[docs/implementation.md](docs/implementation.md#slice-8--behaviour-archive).
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 
