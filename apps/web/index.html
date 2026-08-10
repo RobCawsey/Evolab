@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 5</title>
+    <title>Evolab — slice 6</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -134,6 +134,54 @@
       .island .bar { display: block; height: 4px; border-radius: 2px; background: var(--cyan); opacity: .55; }
       .island.boosted .bar { background: var(--amber); opacity: 1; }
       .island b { width: 40px; text-align: right; flex: none; }
+      /* stage gating — nothing is locked, this only hides what a stage does not need */
+      body[data-stage="guided"] .lab-only,
+      body[data-stage="guided"] #sliders,
+      body[data-stage="guided"] .explorer-only { display: none; }
+      body[data-stage="explorer"] .lab-only { display: none; }
+      body:not([data-stage="guided"]) #guided { display: none; }
+
+      /* guided */
+      #guided { display: flex; flex-direction: column; gap: 2px; }
+      .gd-step { border-bottom: 1px solid var(--line); padding: 9px 0 11px; }
+      .gd-step.later { opacity: .38; }
+      .gd-head { display: flex; align-items: center; gap: 8px; }
+      .gd-head b { font-weight: 400; font-size: 13.5px; }
+      .gd-head em {
+        font-style: normal; margin-left: auto; font-family: var(--mono); font-size: 9px;
+        letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+      }
+      .gd-head em.ok { color: var(--ok); } .gd-head em.am { color: var(--amber); }
+      .gd-n {
+        width: 18px; height: 18px; border-radius: 50%; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--mono); font-size: 10px; color: var(--faint);
+        border: 1px solid var(--line);
+      }
+      .gd-step.on .gd-n { border-color: var(--amber); color: var(--amber); }
+      .gd-step.done .gd-n { border-color: var(--ok); color: var(--ok); }
+      .gd-body { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0 26px; }
+      .gd-step.later .gd-body { display: none; }
+      .gd-card { border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; }
+      .gd-card.on { border-color: #4a3b1f; background: #191426; }
+      .gd-card b { display: block; font-weight: 400; font-size: 12.5px; }
+      .gd-card span { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+      .gd-presets { display: flex; flex-direction: column; gap: 4px; }
+      .gd-preset {
+        text-align: left; padding: 6px 9px; display: flex; flex-direction: column; gap: 1px;
+      }
+      .gd-preset b { font-weight: 400; font-size: 12.5px; }
+      .gd-preset span {
+        font-family: var(--mono); font-size: 9px; letter-spacing: .06em; color: var(--faint);
+      }
+      .gd-preset.on { border-color: var(--amber); background: #191426; }
+      .gd-preset.on b { color: var(--amber); }
+      .gd-note { margin: 2px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dim); }
+      button.wide { width: 100%; }
+      button.ghost { background: transparent; color: var(--dim); }
+      .seg.wide { width: 100%; }
+      .seg.wide button { flex: 1; }
+
       /* stepper */
       .stepper {
         position: fixed; inset: 0; z-index: 20; background: var(--bg);
@@ -188,20 +236,28 @@
   <body>
     <header>
       <span class="brand">Evo<em>lab</em></span>
-      <button id="btn-run" class="pri">Run</button>
-      <button id="btn-reset">Reset</button>
-      <span class="seg">
+      <span class="seg" id="stages">
+        <button id="stage-guided" class="on">Guided</button>
+        <button id="stage-explorer">Explorer</button>
+        <button id="stage-lab">Lab</button>
+      </span>
+      <button id="btn-run" class="pri explorer-only">Run</button>
+      <button id="btn-reset" class="explorer-only">Reset</button>
+      <span class="seg explorer-only">
         <button id="mode-manual" class="on">Manual</button>
         <button id="mode-evolved">Evolved</button>
       </span>
-      <button id="btn-adopt" disabled>Copy champion to sliders</button>
+      <button id="btn-adopt" class="explorer-only" disabled>Copy champion to sliders</button>
       <button id="btn-stepper">Show me how this works →</button>
       <span class="spacer"></span>
       <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode &nbsp;·&nbsp; S — stepper</span>
     </header>
 
     <main>
-      <aside class="left" id="sliders"></aside>
+      <aside class="left">
+        <div id="guided"></div>
+        <div id="sliders"></div>
+      </aside>
 
       <div class="stage-wrap">
         <canvas id="stage"></canvas>
@@ -232,16 +288,16 @@
           <div class="kv"><span>mean</span><b id="s-mean">—</b></div>
           <div class="kv"><span>diversity</span><b id="s-div">—</b></div>
           <div class="divide"></div>
-          <div class="kv"><span>trials</span><b id="s-trials">0</b></div>
-          <div class="kv"><span>trials / s</span><b id="s-tps">—</b></div>
-          <div class="kv"><span>gens / s</span><b id="s-gps">—</b></div>
+          <div class="kv lab-only"><span>trials</span><b id="s-trials">0</b></div>
+          <div class="kv lab-only"><span>trials / s</span><b id="s-tps">—</b></div>
+          <div class="kv lab-only"><span>gens / s</span><b id="s-gps">—</b></div>
           <div class="kv"><span>search time</span><b id="s-elapsed">0.0 s</b></div>
-          <div class="kv"><span>workers</span><b id="s-workers">—</b></div>
-          <div class="kv"><span>parallel speedup</span><b class="ok" id="s-speedup">—</b></div>
+          <div class="kv lab-only"><span>workers</span><b id="s-workers">—</b></div>
+          <div class="kv lab-only"><span>parallel speedup</span><b class="ok" id="s-speedup">—</b></div>
         </div>
 
-        <div class="ph">Islands<span class="sp"></span><em>ring · 2 elites every 5 gens</em></div>
-        <div class="stats" id="islands"></div>
+        <div class="ph lab-only">Islands<span class="sp"></span><em>ring · 2 elites every 5 gens</em></div>
+        <div class="stats lab-only" id="islands"></div>
 
         <div class="ph">Champion</div>
         <div class="stats">

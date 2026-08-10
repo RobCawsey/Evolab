@@ -18,6 +18,24 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 6 — "Guided first run".** The app opens in a guided flow: pick a body, choose a
+goal, watch 24 robots evolve, see what changed. No sliders, four preset goals, and step 4
+replays the first attempt against the champion. About 2,600 robots in 8 seconds, typically
+2.5 m → 6.3 m.
+
+Guided / Explorer / Lab switch in the toolbar and **nothing is locked in either direction**
+— stages only decide which panels are present (`data-stage` on `<body>`, `.explorer-only`
+and `.lab-only` in CSS). Switching never restarts the search.
+
+One preset — *Just reach the line, anything goes* — scores distance and nothing else, on
+purpose. Its afterword is a **function of the outcome**, not a fixed string, because
+evolution does not reliably misbehave and copy that asserts a face-plant when the robot
+plainly walked teaches the reader to stop reading. See §7 on explanations written against
+live values.
+
+**React is still not here, and that was a decision** — the reasoning and the trigger
+condition are in the slice 6 notes. Slice 7's body editor is where it arrives.
+
 **Slice 5 — "The stepper".** The teaching screen. *Show me how this works →* in the
 toolbar, or `S`, opens a full-screen stepper that pauses the algorithm between operators
 and shows each one acting on real genomes — gene strips, tournament draws, crossover
@@ -59,8 +77,9 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 6 — the guided first run, where React finally arrives. Specified in
-[docs/implementation.md](docs/implementation.md#slice-6--guided-first-run).
+Next: slice 7 — the body editor, and the first slice that genuinely earns React and
+Zustand. Specified in
+[docs/implementation.md](docs/implementation.md#slice-7--body-editor).
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 

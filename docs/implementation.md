@@ -26,7 +26,7 @@ first.
 - **Slice 3** — [You can watch it](#slice-3--you-can-watch-it) *(complete)*
 - **Slice 4** — [Off the main thread](#slice-4--off-the-main-thread) *(complete)*
 - **Slice 5** — [The stepper](#slice-5--the-stepper) *(complete)*
-- **Slice 6** — [Guided first run](#slice-6--guided-first-run)
+- **Slice 6** — [Guided first run](#slice-6--guided-first-run) *(complete)*
 - **Slice 7** — [Body editor](#slice-7--body-editor)
 - **Slice 8** — [Behaviour archive](#slice-8--behaviour-archive)
 - **Slices 9–14** — [Later stages](#slices-914--later-stages)
@@ -230,8 +230,8 @@ and how to drive it; it does not know what a population is.
 | 3 | [You can watch it](#slice-3--you-can-watch-it) | 2 | **complete** |
 | 4 | [Off the main thread](#slice-4--off-the-main-thread) | 2 | **complete** |
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | **complete** |
-| 6 | [Guided first run](#slice-6--guided-first-run) | 2 | next |
-| 7 | [Body editor](#slice-7--body-editor) | 3 | planned |
+| 6 | [Guided first run](#slice-6--guided-first-run) | 2 | **complete** |
+| 7 | [Body editor](#slice-7--body-editor) | 3 | next |
 | 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | planned |
 | 9 | 3D replay | 3 | sketch |
 | 10 | Gait analysis | 2 | sketch |
@@ -1303,7 +1303,7 @@ state, which is the thing this slice exists to avoid.
 
 ## Slice 6 — Guided first run
 
-> **Status: next.** Two sessions.
+> **Status: complete.** Two sessions.
 
 ### Goal
 
@@ -1316,24 +1316,82 @@ Slices 0–3, and slice 5 for the "show me how this works" entry point.
 
 ### Design
 
-Introduce React here, and not before — this is the first slice with enough panel structure
-to justify it. Port the existing canvas surfaces as components wrapping a ref; the render
-functions themselves do not change.
+Stage state (`guided` / `explorer` / `lab`) is app state, freely switchable from the
+toolbar, with nothing locked (§7 of the design document). It sets `data-stage` on `<body>`
+and CSS decides which panels are present — `.explorer-only` hides in guided,
+`.lab-only` hides in guided and explorer. Switching stages never restarts the search.
 
-Stage state (`guided` / `explorer` / `lab`) becomes app state, freely switchable from the
-toolbar, with nothing locked (§7 of the design document). Four preset objectives, each a
-named weight vector over the fitness terms already implemented in slice 2.
+Four preset objectives, each a named weight vector over the fitness terms from slice 2.
+Changing one rebuilds the pool, because islands take their objective at construction — and
+because a new goal genuinely is a new search, which is what the learner means by it.
+
+Four steps: pick a body, choose a goal, watch, see what changed. Step 4 compares the best
+of generation 0 against the champion, which is why `RunState` carries `firstChampion`
+separately — `champion` is overwritten the moment anything beats it.
+
+### React was deferred, deliberately
+
+The plan said "introduce React here, and not before — this is the first slice with enough
+panel structure to justify it." Having built the panels, that is not true yet, and the
+slice's own *Goal* and *Done when* say nothing about React.
+
+The guided flow is a staged reveal driven by four booleans. Against that, introducing React
+means a new dependency, a plugin, and porting roughly a thousand lines of working, tested
+UI — for no user-visible change in this slice. Worse, the two heaviest surfaces actively do
+not want it: the stage and the chart are imperative canvases redrawn from a `requestAnimationFrame`
+loop, and putting 60 Hz run state into React state is precisely the wrong shape.
+
+**The condition for React is slice 7, not slice 6.** The body editor is direct manipulation
+over a tree of segments and joints, with per-joint inspectors, validation feedback and undo —
+that is a genuine component tree with genuine shared state, and it is where the ceremony
+starts paying for itself. Zustand arrives with it or not at all.
+
+### Two things fixed after seeing it work
+
+**A flow with no way through.** Steps revealed themselves as `done | now | next`, where
+`next` meant collapsed. Step 3 only became `now` once the run had started — but the button
+that starts the run lives inside step 3, so a first-time user was shown a goal picker and no
+way forward. Fixed with a fourth state, `ready`: expanded and actionable but unbadged. It is
+the sort of bug that is invisible when you know where the button is.
+
+**Copy that asserted what had not happened.** The naive goal's afterword read "diving
+forward and landing on its face beats walking" — and on the run I tested, the champion
+walked and stayed upright for the whole trial. The lesson was fine; the sentence was a lie
+about the screen the learner was looking at.
+
+Afterwords are now **functions of the outcome**, not fixed strings:
+
+```ts
+afterword: (o) => o.fell
+  ? `Look at what won. It fell after ${o.uprightTime.toFixed(1)} s and still scored best…`
+  : 'This time the search found something that walks, which is luck rather than design…'
+```
+
+That is what §7 means by explanations "written against live values". Evolution does not
+reliably misbehave, and copy that overclaims teaches the learner to stop reading it.
 
 ### Done when
 
-A first-time user reaches an evolved gait without touching a slider, and can switch to the
-full interface in one click.
+- [x] A first-time user reaches an evolved gait without touching a slider.
+- [x] The full interface is one click away, and nothing is locked in either direction.
+- [x] Four goals, including the deliberately naive one, with the lesson withheld until
+  after the run.
+
+**Observed.** A guided run is 30 generations, 24 individuals, 4 s trials: **2,648 robots
+tried in about 8 seconds**, first attempt 2.54 m, champion 6.27 m. Step 4's toggle replays
+either, so the improvement is watched rather than read.
+
+### Deliberately not in this slice
+
+No challenge track, no per-concept progress, no persistence of what a learner has seen —
+those are slice 11. The stage a user is in survives in the URL and nowhere else.
 
 ---
 
 ## Slice 7 — Body editor
 
-> **Status: planned.** Three sessions.
+> **Status: next.** Three sessions. **React and Zustand arrive here** — see the slice 6
+> notes for why they did not arrive earlier.
 
 ### Goal
 

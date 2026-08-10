@@ -16,8 +16,12 @@ import {
   type Morphology,
 } from '@evolab/evolution';
 import { IslandPool, defaultWorkerCount, type PoolEvents } from '../workers/pool.ts';
+import { DEFAULT_PRESET, type Preset } from './objectives.ts';
 
-export type Mode = 'manual' | 'evolved';
+/** Which gait the stage replays. 'first' is generation 0's best — the before picture. */
+export type Mode = 'manual' | 'evolved' | 'first';
+
+export type AppStage = 'guided' | 'explorer' | 'lab';
 
 /** One point on the fitness chart: the ring aggregated at a generation boundary. */
 export interface HistoryPoint {
@@ -40,6 +44,16 @@ export interface RunState {
   workers: number;
   mode: Mode;
   manualGait: GaitParams;
+  /** guided / explorer / lab. Freely switchable, nothing locked — section 7. */
+  stage: AppStage;
+  preset: Preset;
+  /**
+   * Best of generation 0, kept for the before-and-after in guided step 4.
+   *
+   * Captured separately from champion because champion is overwritten the moment anything
+   * beats it, and the whole point of step 4 is having the first attempt to compare against.
+   */
+  firstChampion: { genes: Genome; fitness: number; params: GaitParams; summary: GenerationSummary } | null;
   /** Generation of the slowest island at the last history sample. */
   lastRecorded: number;
   startedAt: number;
@@ -54,6 +68,8 @@ export interface RunOptions {
   workers?: number;
   manualGait?: GaitParams;
   mode?: Mode;
+  stage?: AppStage;
+  preset?: Preset;
 }
 
 export function createRunState(opts: RunOptions = {}): RunState {
@@ -68,6 +84,9 @@ export function createRunState(opts: RunOptions = {}): RunState {
     population: opts.population ?? 24,
     workers: opts.workers ?? defaultWorkerCount(),
     mode: opts.mode ?? 'manual',
+    stage: opts.stage ?? 'guided',
+    preset: opts.preset ?? DEFAULT_PRESET,
+    firstChampion: null,
     manualGait: opts.manualGait ?? defaultGait(),
     lastRecorded: -1,
     startedAt: 0,
@@ -92,18 +111,35 @@ export function spawnPool(
       seed: state.seed,
       workers: state.workers,
       trialSeconds: state.trialSeconds,
-      config: { size: state.population, trialSeconds: state.trialSeconds },
+      config: {
+        size: state.population,
+        trialSeconds: state.trialSeconds,
+        objective: state.preset.objective,
+      },
     },
     events,
   );
   state.pool = pool;
   state.history = [];
   state.champion = null;
+  state.firstChampion = null;
   state.running = false;
   state.lastRecorded = -1;
   state.startedAt = 0;
   state.elapsedMs = 0;
   return pool;
+}
+
+/** Best of generation 0 — the "before" half of guided step 4. */
+export function offerFirst(state: RunState, summary: GenerationSummary): void {
+  if (summary.generation !== 0) return;
+  if (state.firstChampion !== null && summary.best <= state.firstChampion.fitness) return;
+  state.firstChampion = {
+    genes: summary.bestGenome,
+    fitness: summary.best,
+    params: decodeGenome(summary.bestGenome),
+    summary,
+  };
 }
 
 /**
@@ -145,7 +181,9 @@ export function sampleHistory(state: RunState): boolean {
 
 /** The gait the stage should be replaying right now. */
 export function activeGait(state: RunState): GaitParams {
-  return state.mode === 'evolved' && state.champion ? state.champion.params : state.manualGait;
+  if (state.mode === 'first' && state.firstChampion) return state.firstChampion.params;
+  if (state.mode === 'evolved' && state.champion) return state.champion.params;
+  return state.manualGait;
 }
 
 /** Copy the champion into the sliders, so it can be poked at by hand. */

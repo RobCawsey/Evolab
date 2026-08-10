@@ -1,5 +1,5 @@
 /**
- * Slice 4 — "off the main thread".
+ * Slice 6 — "guided first run".
  *
  * A fitness chart climbing beside a live replay of the current champion, with the slice-1
  * sliders still there so a hand-tuned gait and an evolved one can be compared on the same
@@ -18,8 +18,11 @@ import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
+import { createGuided } from './ui/guided.ts';
+import { presetByKey, type Preset } from './run/objectives.ts';
 import {
-  activeGait, adoptChampion, createRunState, offerChampion, sampleHistory, spawnPool,
+  activeGait, adoptChampion, createRunState, offerChampion, offerFirst, sampleHistory,
+  spawnPool, type AppStage,
 } from './run/state.ts';
 import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
 
@@ -65,11 +68,15 @@ const workersParam = params.has('workers') ? Math.max(1, num('workers', 1)) : un
 const state = createRunState({
   ...(workersParam === undefined ? {} : { workers: workersParam }),
   seed: num('seed', 4417),
-  target: num('gens', 40),
+  target: num('gens', 30),
   trialSeconds: num('seconds', 4),
   population: num('pop', 24),
   manualGait: gaitParam ? decodeGait(gaitParam, defaultGait()) : defaultGait(),
   mode: params.get('mode') === 'evolved' ? 'evolved' : 'manual',
+  preset: presetByKey(params.get('goal')),
+  stage: (['guided', 'explorer', 'lab'] as const).includes(params.get('stage') as AppStage)
+    ? (params.get('stage') as AppStage)
+    : 'guided',
 });
 
 /**
@@ -84,6 +91,7 @@ function startPool(): void {
       paintIslands();
     },
     onGeneration: (_id, summary) => {
+      offerFirst(state, summary);
       if (offerChampion(state, summary)) {
         el('btn-adopt').removeAttribute('disabled');
         if (state.history.length <= 1) setMode('evolved');
@@ -120,15 +128,36 @@ const panel = createSliders(el('sliders'), state.manualGait, (next) => {
 
 /* ---------------- controls ---------------- */
 
-function setMode(mode: 'manual' | 'evolved'): void {
+const BADGE: Record<'manual' | 'evolved' | 'first', string> = {
+  manual: 'manual gait',
+  evolved: 'evolved champion',
+  first: 'first attempt',
+};
+
+function setMode(mode: 'manual' | 'evolved' | 'first'): void {
   if (mode === 'evolved' && !state.champion) return;
+  if (mode === 'first' && !state.firstChampion) return;
   state.mode = mode;
   el('mode-manual').classList.toggle('on', mode === 'manual');
   el('mode-evolved').classList.toggle('on', mode === 'evolved');
-  el('sliders').classList.toggle('locked', mode === 'evolved');
-  hud.badge.textContent = mode === 'evolved' ? 'evolved champion' : 'manual gait';
+  el('sliders').classList.toggle('locked', mode !== 'manual');
+  hud.badge.textContent = BADGE[mode];
   hud.badge.classList.toggle('evolved', mode === 'evolved');
   respawn();
+  queueUrl();
+}
+
+/**
+ * Guided / Explorer / Lab. Nothing is locked — this only decides which panels are on
+ * screen, so a curious beginner reaches the full instrument in one click and an
+ * experienced user never has to earn it (§7 of the design document).
+ */
+function setStage(next: AppStage): void {
+  state.stage = next;
+  document.body.dataset['stage'] = next;
+  for (const s of ['guided', 'explorer', 'lab'] as const) {
+    el(`stage-${s}`).classList.toggle('on', s === next);
+  }
   queueUrl();
 }
 
@@ -163,12 +192,39 @@ el('btn-adopt').addEventListener('click', () => {
   queueUrl();
 });
 
+for (const s of ['guided', 'explorer', 'lab'] as const) {
+  el(`stage-${s}`).addEventListener('click', () => setStage(s));
+}
+
 /**
  * The stepper owns its own small island rather than borrowing one from the pool: stepping
  * needs synchronous control of a generation, and the pool's islands live in workers.
  */
 const stepper = createStepper(morph, { seed: state.seed });
 el('btn-stepper').addEventListener('click', () => stepper.open());
+
+const guided = createGuided(el('guided'), {
+  // Changing the goal changes what every island is scoring against, and islands take their
+  // objective at construction — so a new goal is a new search, which is also what the
+  // learner means by it.
+  onPreset(preset: Preset): void {
+    state.preset = preset;
+    state.running = false;
+    startPool();
+    setMode('manual');
+    queueUrl();
+  },
+  onRun(): void {
+    if (!state.pool) return;
+    if (state.pool.generation >= state.target) startPool();
+    setRunning(!state.running);
+  },
+  onWatch(which): void {
+    setMode(which === 'first' ? 'first' : 'evolved');
+  },
+  onStepper: () => stepper.open(),
+  onExplorer: () => setStage('explorer'),
+});
 
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
@@ -188,6 +244,8 @@ function queueUrl(): void {
     q.set('gens', String(state.target));
     q.set('gait', encodeGait(state.manualGait));
     if (state.mode === 'evolved') q.set('mode', 'evolved');
+    q.set('stage', state.stage);
+    q.set('goal', state.preset.key);
     history.replaceState(null, '', `?${q.toString()}`);
   }, 250);
 }
@@ -284,15 +342,43 @@ function paintStats(): void {
   paintIslands();
 
   const r = state.champion ? state.champion.summary.bestResult : null;
+  guided.update({
+    championDistance: state.champion?.summary.bestResult?.distance ?? null,
+    firstDistance: state.firstChampion?.summary.bestResult?.distance ?? null,
+    generation: gen,
+    target: state.target,
+    running: state.running,
+    ready: pool?.ready ?? false,
+    preset: state.preset,
+    watching: state.mode === 'first' ? 'first' : 'champion',
+    trials: pool?.trials ?? 0,
+    outcome: r
+      ? {
+          fell: r.fell,
+          distance: r.distance,
+          uprightTime: r.uprightTime,
+          trialSeconds: state.trialSeconds,
+        }
+      : null,
+  });
+
   champ.dist.textContent = r ? `${r.distance.toFixed(2)} m` : '—';
   champ.upright.textContent = r ? `${r.uprightTime.toFixed(2)} s of ${state.trialSeconds}` : '—';
   champ.effort.textContent = r ? `${r.effort.toFixed(0)} rad` : '—';
   champ.fell.textContent = r ? (r.fell ? 'yes' : 'no') : '—';
-  if (r) {
+  // The note has to suit the stage: in guided there are no sliders to be told about.
+  if (!r) {
+    champ.note.textContent = state.stage === 'guided'
+      ? 'Pick a goal, then start evolving. The first robots will fall over immediately.'
+      : 'Nothing evolved yet. Tune the sliders by hand first — then press Run and watch how long it takes to beat you.';
+  } else {
     champ.fell.className = r.fell ? 'fell' : 'ok';
-    champ.note.textContent = state.mode === 'evolved'
-      ? 'The stage is replaying the best genome found so far. Switch to Manual to compare.'
-      : 'Switch to Evolved to watch the champion, or copy it into the sliders and poke at it.';
+    champ.note.textContent =
+      state.stage === 'guided'
+        ? 'This is the best gait found so far. Step 4 lets you compare it with the first attempt.'
+        : state.mode === 'evolved'
+          ? 'The stage is replaying the best genome found so far. Switch to Manual to compare.'
+          : 'Switch to Evolved to watch the champion, or copy it into the sliders and poke at it.';
   }
 }
 
@@ -333,6 +419,7 @@ async function boot(): Promise<void> {
   resize();
   respawn();
   el('s-workers').textContent = String(state.workers);
+  setStage(state.stage);
   startPool();
   setMode('manual');
   queueUrl();
