@@ -2000,13 +2000,256 @@ legible; a third axis is 13,824 cells and cannot be blitted.
 
 ---
 
-## Slices 11–14 — Later stages
+## Slice 11 — Challenge track
+
+> **Status: next.** Two sessions. The first slice since 6 that adds *teaching* rather than
+> instrumentation, and the one the whole §7 learning design has been waiting for.
+
+### Goal
+
+The concept ladder from §7 of the design document, expressed as work rather than as lessons:
+a track of challenges, each naming the concept it teaches, each setting the app up so the
+learner runs into that concept and cannot miss it. Fig 9.2.
+
+Nothing is locked. Later challenges are dimmed as guidance, not gated — a postgraduate who
+already knows NSGA-II starts anywhere, and a beginner is never punished for looking.
+
+### Depends on
+
+Everything, and **almost nothing new in the engine**. Ten slices have built the instrument;
+this one points at it. The two exceptions are named under *Plumbing* below.
+
+### The concept audit — do this first
+
+§7 lists fifteen concepts. Twelve are reachable with what exists today, and **three are not**.
+Finding that out halfway through the slice would be expensive, so it is settled here.
+
+| Concept | Reachable via | Status |
+|---|---|---|
+| Population & fitness | guided step 3 — 24 robots, ranked, most fall over | ✅ slice 6 |
+| Selection pressure | stepper, tournament stage | ✅ slice 5 |
+| Crossover | stepper, gene strips | ✅ slice 5 |
+| Mutation rate | `IslandConfig.mutationRate` | ⚠️ exists, not plumbed |
+| Elitism | `IslandConfig.elites = 0` | ⚠️ exists, not plumbed |
+| Convergence & diversity | the diversity series on the chart | ✅ slice 3 |
+| Local optima | re-run from a different seed | ✅ |
+| Fitness design | objective weights — **the payload** | ⚠️ presets only, no per-term control |
+| Quality–diversity | the behaviour archive | ✅ slice 8 |
+| Stance & swing | footfall diagram | ✅ slice 10 |
+| Duty factor | archive's y-axis, and the footfall caption | ✅ slices 8, 10 |
+| Cost of transport | the effort term | ✅ — but see the caveat below |
+| **Multi-objective** | a Pareto front | ❌ **not built and not planned** |
+| **Stability margin** | the shove task | ❌ **needs slice 14's terrain** |
+| **Symmetry** | an evolved limp | ❌ **impossible by construction** |
+
+The last one is worth stating loudly because it is permanent rather than pending.
+`gaitTargets` reads `params[joint.kind]`, so both legs share one amplitude, phase and centre
+and differ only by a half-cycle offset in `SIDE_PHASE`. **This robot cannot limp.** An
+asymmetric gait is not unimplemented; it is unrepresentable in eleven genes, and eleven genes
+is the decision that lets a gait transfer between bodies (slice 7). Drop the symmetry concept
+from the ladder or drop the transferable genome — and the genome is worth more.
+
+*Caveat on cost of transport:* `TrialResult.effort` is **total joint travel in radians, not
+joules** — Rapier's JS binding exposes no joint impulses. The challenge must say what it is
+measuring. Calling radians "energy" in a teaching tool is exactly the kind of quiet lie the
+rest of this project has been careful to avoid.
+
+**Also fix while here:** Appendix B of this document describes a *"Parametric, independent
+(slice 7+)"* genome layout that was never adopted — slice 7 deliberately kept eleven genes.
+The appendix is aspirational and reads as fact.
+
+### The eleven challenges
+
+Eleven cards covering the twelve reachable concepts, in the order a learner hits the need.
+
+| # | Card | Teaches |
+|---|---|---|
+| 1 | Twenty-four robots, none of them designed | population & fitness |
+| 2 | Watch two of three get thrown away | selection pressure |
+| 3 | Where does a child come from? | crossover |
+| 4 | **Ten metres, any way you can** | fitness design |
+| 5 | Put the guard rails back | fitness design (part two) |
+| 6 | Lose the best one | elitism |
+| 7 | Too little, too much | mutation rate |
+| 8 | It stopped improving at generation 12 | convergence & diversity, local optima |
+| 9 | Three ways to walk the same distance | quality–diversity |
+| 10 | Read the footfalls | stance & swing, duty factor |
+| 11 | The fastest gait is not the cheapest | cost of transport |
+
+Cards 1–3 mostly *frame* things the app already does; the work in them is copy and a success
+check, not machinery.
+
+### Design — a challenge is data
+
+```ts
+export interface Challenge {
+  readonly id: string;
+  readonly title: string;
+  /** Concept ids. Every one must have a note — asserted by a test. */
+  readonly teaches: readonly string[];
+  readonly brief: string;
+  /** How the app is configured when the card is opened. */
+  readonly setup: {
+    readonly stage?: AppStage;
+    readonly goal?: string;                    // preset key
+    readonly gens?: number;
+    readonly seed?: number;
+    readonly config?: Partial<IslandConfig>;   // elites, mutationRate, objective
+    readonly open?: 'stepper' | 'archive' | 'gait' | '3d';
+  };
+  readonly success: Check;
+  readonly afterword: Afterword;
+}
+```
+
+**Defined in TypeScript, shaped as JSON.** §6 decides that tasks are declarative JSON so they
+can ship without a release — which is true and has no customer until there is a server to
+fetch them from (slice 12). Writing them as typed object literals now buys compile-time
+checking of every concept id and preset key for free. A test asserts
+`JSON.parse(JSON.stringify(CHALLENGES))` deep-equals the original, so moving to fetched JSON
+later is a file move rather than a rewrite. No `Date`, no functions, no `undefined`.
+
+### The afterword problem — the one shape decision worth getting right
+
+Slice 6 learned this the hard way: a fixed string asserting that the robot face-planted, shown
+after a run where it plainly walked, **teaches the reader to stop reading**. Its presets solved
+it by making `afterword` a function of the outcome.
+
+Challenges are data and cannot hold functions. So the format needs conditionals and
+interpolation:
+
+```ts
+type Afterword =
+  | { readonly text: string }                       // "{championDistance} m" interpolated
+  | { readonly when: Check; readonly then: Afterword; readonly otherwise: Afterword };
+```
+
+Every `{placeholder}` resolves against the same `RunOutcome` the checks read, and **a test
+asserts that every placeholder in every afterword names a field that exists** — otherwise the
+first time a card fires it prints `{championDistnce}` at a learner.
+
+This is the piece to build first and test hardest. It is small, it is pure, and every card
+depends on it.
+
+### Card 4 is the whole slice
+
+*"Ten metres, any way you can"* ships with the naïve objective: distance scored, nothing else.
+§7 and §15 both say so, and slice 6's `naive` preset already exists. The learner watches the
+robot launch itself down the track, score brilliantly, and be obviously wrong — then is asked
+to **fix the objective, not the robot**.
+
+Card 5 is the other half: switch the upright term on, run again, then the effort term. The
+defensive terms from §3 are off here and default on everywhere else.
+
+Two things this needs that do not exist:
+
+- **Per-term objective control in the UI.** Today there are four presets and no weight
+  sliders. Card 5 is meaningless without a way to turn one term on. Smallest honest version:
+  three checkboxes on the challenge card itself that write into `state.preset.objective`, not
+  a general-purpose weights panel — that is Explorer's job and can wait.
+- **An honest afterword.** Evolution does not reliably dive. If it walks, the card must say
+  so and still make the point: *the objective did not punish diving, and this time it did not
+  need to.* Same rule as slice 6.
+
+### Plumbing
+
+Two small changes below `apps/web/src/challenges/`:
+
+1. `spawnPool` passes only `size`, `trialSeconds` and `objective` into `IslandConfig`. Cards 6
+   and 7 need `elites` and `mutationRate` through as well. Add them to `RunState` and thread
+   them; both already exist on `IslandConfig`.
+2. `RunState` needs the current challenge id, so a reload lands back on the card.
+
+### Progress, and the first thing this project stores
+
+**Per concept, not per star** — the panel answers *what do I understand now*, not *how much
+have I completed*. So progress is a set of concept ids, not a count of cards.
+
+It is also the first state that cannot live in the URL. `localStorage` under one key, a set of
+concept ids and the challenge ids that satisfied them. Not Dexie, not OPFS: this is a few
+hundred bytes, the server is slice 12, and §11's immutability rules matter when *runs* are
+stored, which is not what this is.
+
+Explanations dismissed in Lab are **permanent per concept**, not per session — §7 — so they
+live in the same record.
+
+### Explanations that cannot rot
+
+One `?` control per panel opening a short note in the right rail. No tooltips, no modals, no
+tour that hijacks the pointer.
+
+The test §7 asks for, and it is cheap: **every concept referenced by a challenge has a note,
+and every note is reachable from at least one challenge.** Both directions. That is what stops
+the explanation layer drifting from the product, and it is the same class of guard as slice
+10's palette test — duplicated knowledge in two files with a comment asking them to agree is
+not a mechanism.
+
+### Files
+
+```
+apps/web/src/challenges/
+  types.ts        Challenge, Check, Afterword, RunOutcome
+  data.ts         the eleven cards
+  notes.ts        concept id → plain-language note
+  check.ts        evaluating a Check and rendering an Afterword. Pure, Node-testable.
+  progress.ts     concept ids in localStorage
+  track.ts        the track panel — Fig 9.2
+```
+
+`check.ts` is the only part with real logic and it is pure, so it tests in Node like
+`bodies.ts` does. Everything else is data or DOM.
+
+### Watch for
+
+- **Nothing is locked.** Dimmed, never gated. Switching stage or opening Lab mid-challenge
+  must not reset anything — same rule as slice 6.
+- **A challenge must never silently change the body.** Card setups touch the objective, the
+  seed, the generation count and the GA knobs. If one changed the morphology the archive and
+  every stored fitness would quietly become incomparable.
+- **Do not let a card call `evaluate`.** Same rule as slice 10, same reason. A card configures
+  a run and reads its outcome; it does not simulate.
+- **Success checks read the outcome, not the screen.** `championDistance`, `coverage`,
+  `diversity`, `generations`. A check that scrapes the DOM would break the first time a panel
+  moved.
+- **The naive-objective card must survive evolution behaving itself.** Test the afterword
+  against both branches.
+
+### Done when
+
+- [ ] Eleven cards render as a track, each naming its concepts, later ones dimmed not locked.
+- [ ] Opening a card configures the app — stage, goal, seed, generations, GA knobs — in one click.
+- [ ] Success is evaluated from the run outcome and marks concepts, not cards, complete.
+- [ ] Afterwords interpolate live values and branch on the outcome; a test covers both branches
+      of card 4.
+- [ ] A test asserts every referenced concept has a note and every note is reachable.
+- [ ] A test asserts the challenge data round-trips through `JSON.stringify`.
+- [ ] A test asserts every afterword placeholder names a field that exists on `RunOutcome`.
+- [ ] Progress survives a reload; explanations dismissed in Lab stay dismissed.
+- [ ] `npm test` passes and the golden number is still 6.4598 — none of this touches the search.
+
+### Deliberately not in this slice
+
+**No multi-objective, no Pareto front, no stability margin, no symmetry.** Three concepts from
+§7's ladder are out of reach; the audit above says which and why. The ladder in §7 should be
+annotated rather than quietly under-delivered.
+
+**No general-purpose objective weight sliders.** Card 5 gets three checkboxes on the card.
+Full weight control is Explorer's job and belongs with multi-objective, if that ever arrives.
+
+**No authoring UI.** §6 imagines users writing their own tasks in v1.1. There is one user, and
+he can edit a TypeScript file.
+
+**No server, no sync, no accounts.** Progress is `localStorage` and stays that way until slice
+12 gives it somewhere to go.
+
+---
+
+## Slices 12–14 — Later stages
 
 Sketches only. Each will be written out fully at the end of the slice before it.
 
 | # | Name | Shape of the work |
 |---|---|---|
-| 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. It is the first slice since 6 that adds *teaching* rather than instrumentation — everything needed to show a learner what went wrong now exists. |
 | 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. It is also where §12's four remaining *slice 12* rows — backend, server data, storage, deploy — stop being plans. |
 | 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |
 | 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |
@@ -2082,7 +2325,21 @@ are the same eleven numbers in the same order.
 
 Left and right joints share parameters; the right side adds π to phase.
 
-### Parametric, independent (slice 7+)
+### Parametric, independent — planned for slice 7, **not adopted**
+
+> **This section describes a layout that was never built, and it read as fact until the
+> slice 11 concept audit went looking for a way to teach asymmetry.**
+>
+> Slice 7 kept the genome at **eleven mirrored genes** on purpose. `gaitTargets` reads
+> `params[joint.kind]`, so both legs share one amplitude, phase and centre and differ only by
+> a half-cycle offset in `SIDE_PHASE`. That is what lets an evolved gait be dropped onto a
+> different set of legs — the single most instructive thing in the body editor — and it is
+> worth more than asymmetry.
+>
+> The consequence: **this robot cannot limp.** §7's *symmetry* concept is not unimplemented,
+> it is unrepresentable, and the concept ladder should say so. The rest of this section is
+> kept as the design that was considered, in case a lateral or asymmetric term is ever worth
+> the transferability it would cost.
 
 Once the body is user-editable, genome length is computed from the morphology rather than
 fixed:

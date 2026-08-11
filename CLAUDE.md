@@ -176,8 +176,14 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 11 — the challenge track. Specified in
-[docs/implementation.md](docs/implementation.md#slices-1114--later-stages).
+Next: slice 11 — the challenge track, now written out in full in
+[docs/implementation.md](docs/implementation.md#slice-11--challenge-track).
+
+**Three of §7's fifteen concepts are out of reach and the spec says which.** Multi-objective
+needs a Pareto front that is not built; stability margin needs slice 14's terrain; and
+**symmetry is impossible by construction** — `gaitTargets` reads `params[joint.kind]`, so both
+legs share one amplitude, phase and centre and this robot cannot limp. That is the price of
+the eleven-gene transferable genome, and it is worth paying.
 
 It is the first slice since 6 that adds **teaching** rather than instrumentation. Everything
 needed to show a learner what went wrong now exists: the stepper shows the operators, the
