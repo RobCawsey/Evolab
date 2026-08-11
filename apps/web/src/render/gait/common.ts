@@ -19,7 +19,19 @@ export const GAIT_COLOURS = {
   label: '#5c5871',
   text: '#8c8899',
   playhead: '#e9a13b',
-  /** Near leg — matches the 2D renderer and the 3D scene, so a colour means one leg everywhere. */
+  /**
+   * The legs, matching `render/three/scene.ts` exactly. **Change one and change the other.**
+   *
+   * These were originally cyan and violet here while the 3D robot wore cyan and a dim teal,
+   * so the diagram used a colour no leg had and a reader could only trust the text label.
+   * Matching the 3D scene's dim teal fixed the mismatch and created a worse one: a diagram
+   * shows two equally important series, and dimming one says the right leg matters less.
+   * Depth shading belongs in a 3D scene, where lighting already carries it, not in a chart.
+   *
+   * So the *robot* moved instead. Both legs are now equal-weight and distinct in both places,
+   * and the far leg is genuinely easier to follow while it walks. The 2D view keeps its own
+   * greys, where near/far is carried by brightness and `FAR_LEG_RENDER_OFFSET` together.
+   */
   near: '#4ea8c4',
   far: '#8b7bd8',
   hip: '#e9a13b',

@@ -1946,6 +1946,24 @@ room to spare, which was the thing the previous slice's notes said to check.
   periodicity. A converged gait draws a closed loop; one still falling over draws a spiral
   that never closes.
 
+### The legs are one colour everywhere
+
+The footfall lanes identify themselves by wearing the colours the robot wears. They did not,
+at first: the diagram used cyan and violet while the 3D robot wore cyan and a dim teal, so the
+right lane was a colour no leg had — and on the fitness chart violet already means *diversity*.
+A reader had nothing to connect the bar to and could only trust the text label, which is
+exactly the doubt that surfaced it.
+
+Copying the scene's dim teal into the diagram fixed the mismatch and created a worse one. A 3D
+scene may shade the far leg, because lighting already says *further away*; a chart may not,
+because its two lanes carry equally important data and dimming one says otherwise. The right
+lane became measurably harder to read — 292 against 442 in summed channel luminance.
+
+So the robot moved instead. Both legs are equal-weight and distinct in both places, and the
+far leg is easier to follow while it walks as a side effect. Two tests guard it: one asserting
+the two files' palettes match and the hues differ, one bounding the luminance ratio at 1.3.
+The first was mutation-tested by reintroducing the dim teal and watching it fail.
+
 ### A bug the tests found
 
 `xToFrame` could name a frame that does not exist. The `max(1, …)` guarding against a

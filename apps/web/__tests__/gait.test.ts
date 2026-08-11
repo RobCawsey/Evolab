@@ -51,6 +51,48 @@ describe('the gait panels re-run nothing', () => {
   });
 });
 
+describe('a leg is the same colour everywhere it is drawn', () => {
+  it('keeps the footfall lanes and the 3D robot in step', () => {
+    // Regression guard for exactly the bug this test was written after. The footfall diagram
+    // identifies its two lanes by wearing the colours the robot wears; while they disagreed,
+    // the right lane was violet and no leg anywhere was violet, so a reader had nothing to
+    // connect the bar to and could only trust the text label. Duplicated constants in two
+    // files with a comment asking politely for them to match is not a mechanism.
+    const scene = readFileSync(
+      fileURLToPath(new URL('../src/render/three/scene.ts', import.meta.url)), 'utf8',
+    );
+    const common = readFileSync(
+      fileURLToPath(new URL('../src/render/gait/common.ts', import.meta.url)), 'utf8',
+    );
+    const hex = (text: string, key: 'near' | 'far') => {
+      const m = text.match(new RegExp(`^\\s*${key}:\\s*(?:0x|')#?([0-9a-fA-F]{6})`, 'm'));
+      expect(m, `no ${key} colour found`).not.toBeNull();
+      return m![1]!.toLowerCase();
+    };
+
+    expect(hex(common, 'near')).toBe(hex(scene, 'near'));
+    expect(hex(common, 'far')).toBe(hex(scene, 'far'));
+    // And the two legs must be told apart at a glance, which a shade of the same hue is not.
+    expect(hex(common, 'near')).not.toBe(hex(common, 'far'));
+  });
+
+  it('gives both legs equal visual weight in the diagram', () => {
+    // A 3D scene may shade the far leg, because lighting already says "further away". A chart
+    // may not: the two lanes carry equally important data, and dimming one says otherwise.
+    // The first attempt at fixing the mismatch copied the scene's dim teal and did exactly
+    // that — the right lane became noticeably harder to read than the left.
+    const common = readFileSync(
+      fileURLToPath(new URL('../src/render/gait/common.ts', import.meta.url)), 'utf8',
+    );
+    const lum = (key: 'near' | 'far') => {
+      const m = common.match(new RegExp(`^\\s*${key}:\\s*'#([0-9a-fA-F]{6})'`, 'm'))![1]!;
+      return [0, 2, 4].reduce((s, i) => s + parseInt(m.slice(i, i + 2), 16), 0);
+    };
+    const ratio = Math.max(lum('near'), lum('far')) / Math.min(lum('near'), lum('far'));
+    expect(ratio).toBeLessThan(1.3);
+  });
+});
+
 describe('the shared time axis', () => {
   it('maps the first and last frame to the ends of the plot', () => {
     const plot = plotRect(400, 100);

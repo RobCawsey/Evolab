@@ -28,8 +28,18 @@ const COLOURS = {
   grid: 0x322f42,
   gridCentre: 0x4c4868,
   torso: 0xc9c5d8,
+  /**
+   * The legs. **These are duplicated in `render/gait/common.ts` and must stay in step** — the
+   * footfall diagram identifies its two lanes by wearing the same colours the robot does.
+   *
+   * The far leg was a dimmer shade of the near one until slice 10, on the reasonable theory
+   * that recessed things should look recessed. Lighting already does that here, and the
+   * footfall diagram could not use a dim colour for a lane that matters exactly as much as
+   * the bright one. Two equal-weight hues serve both, and the far leg became easier to follow
+   * while it walks as a side effect.
+   */
   near: 0x4ea8c4,
-  far: 0x2f6f86,
+  far: 0x8b7bd8,
 } as const;
 
 export interface OrbitState {
