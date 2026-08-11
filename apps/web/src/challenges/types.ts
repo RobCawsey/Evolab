@@ -49,6 +49,16 @@ export const OUTCOME_KEYS = [
   'archiveCells',
   'trialSeconds',
   'population',
+  /**
+   * Operators the learner has actually watched in the stepper, this session.
+   *
+   * The stepper runs its own island, so nothing it does shows up in the pool's numbers —
+   * which is why cards 2 and 3 could not be completed by doing what they asked. These are
+   * the only outcome fields not measured from a run.
+   */
+  'stepperSelections',
+  'stepperCrossovers',
+  'stepperMutations',
 ] as const;
 
 export type Metric = (typeof OUTCOME_KEYS)[number];

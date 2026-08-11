@@ -43,7 +43,7 @@ import { createTrack } from './challenges/track.ts';
 import { evaluateCheck } from './challenges/check.ts';
 import { challengeById } from './challenges/data.ts';
 import {
-  completeCard, dismissNote, loadProgress, saveProgress,
+  completeCard, completed, dismissNote, loadProgress, saveProgress,
 } from './challenges/progress.ts';
 import type { Challenge, Outcome } from './challenges/types.ts';
 import {
@@ -407,7 +407,25 @@ for (const s of ['guided', 'explorer', 'lab'] as const) {
  * The stepper owns its own small island rather than borrowing one from the pool: stepping
  * needs synchronous control of a generation, and the pool's islands live in workers.
  */
-const stepper = createStepper(morph, { seed: state.seed });
+/**
+ * Operators watched in the stepper this session.
+ *
+ * Not persisted: the point of cards 2 and 3 is that you *saw* the thing happen, and a count
+ * restored from storage would assert that about someone who had not.
+ */
+const stepped = { select: 0, crossover: 0, mutate: 0 };
+
+const stepper = createStepper(morph, {
+  seed: state.seed,
+  onStage: (kind) => {
+    if (kind !== 'select' && kind !== 'crossover' && kind !== 'mutate') return;
+    stepped[kind]++;
+    // Checked immediately rather than at the end of a run. A stepper card has no run to end
+    // — that was the bug: card 2 asked you to watch a tournament and then waited for thirty
+    // generations of a pool the stepper does not touch.
+    settleChallenge();
+  },
+});
 el('btn-stepper').addEventListener('click', () => stepper.open());
 
 const editor = createEditor(el('editor'), {
@@ -647,6 +665,9 @@ function currentOutcome(): Outcome {
     archiveCells: archive?.filled ?? 0,
     trialSeconds: state.trialSeconds,
     population: state.population,
+    stepperSelections: stepped.select,
+    stepperCrossovers: stepped.crossover,
+    stepperMutations: stepped.mutate,
   };
 }
 
@@ -704,12 +725,32 @@ function openChallenge(challenge: Challenge): void {
  * Progress is **per concept, not per card** — the panel answers "what do I understand now".
  * Two cards teaching `fitness-design` mark one concept between them.
  */
-function settleChallenge(): void {
+/**
+ * A run reached its target. The afterword is due **whether or not the card was completed** —
+ * the `otherwise` branches are where the teaching lives, and a learner whose robot fell needs
+ * to be told why more than one whose robot walked.
+ */
+function finishRun(): void {
   runFinished = true;
+  settleChallenge();
+}
+
+/**
+ * Mark the open card complete if its check now holds. Cheap and idempotent, so it can be
+ * called from anywhere something relevant might have changed.
+ *
+ * Progress is per concept, not per card — two cards teaching `fitness-design` mark one
+ * concept between them.
+ */
+function settleChallenge(): void {
   const challenge = challengeById(state.challenge);
-  if (challenge && evaluateCheck(challenge.success, currentOutcome())) {
+  if (challenge && !completed(progress, challenge.id)
+      && evaluateCheck(challenge.success, currentOutcome())) {
     progress = completeCard(progress, challenge.id, challenge.teaches);
     saveProgress(progress);
+    // A stepper card has no run to end, so completing it *is* its outcome and that is when
+    // its afterword becomes due.
+    runFinished = true;
   }
   paintTrack();
 }
@@ -790,7 +831,7 @@ function frame(now: number): void {
       state.running = false;
       state.pool.pause();
       el('btn-run').textContent = 'Run';
-      settleChallenge();
+      finishRun();
     }
   }
 

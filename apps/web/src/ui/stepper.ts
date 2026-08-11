@@ -29,6 +29,16 @@ export interface StepperOptions {
   readonly population?: number;
   readonly trialSeconds?: number;
   readonly seed?: number;
+  /**
+   * Called with each operator as it is stepped past.
+   *
+   * The stepper runs its **own island**, deliberately — it needs synchronous control of a
+   * generation and the pool's islands live in workers. That separation is why the challenge
+   * track cannot tell whether a learner has watched a tournament by looking at the pool: the
+   * two searches share nothing. This is the one wire between them, and it carries the only
+   * fact the track needs, which is that the operator was seen.
+   */
+  readonly onStage?: (stage: Stage['stage']) => void;
 }
 
 export interface Stepper {
@@ -315,6 +325,7 @@ export function createStepper(initialMorph: Morphology, opts: StepperOptions = {
       finished = true;
     } else {
       current = next.value;
+      opts.onStage?.(current.stage);
     }
     render();
     where();

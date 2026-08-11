@@ -58,7 +58,9 @@ export const CHALLENGES: readonly Challenge[] = [
       'fitter ones get chosen more often.',
     task: 'Open the stepper and step through a tournament. Watch three genomes go in and one come out.',
     setup: { stage: 'explorer', focus: 'stepper' },
-    success: { metric: 'generations', op: '>=', value: 1 },
+    // Checks the operator the card asks you to watch, not the pool — the stepper runs its
+    // own island, so a pool-based check could not be satisfied by doing what the card says.
+    success: { metric: 'stepperSelections', op: '>=', value: 1 },
     afterword: {
       text:
         'Three drawn at random, the best one kept. Run it enough times and fitter genomes become ' +
@@ -75,7 +77,7 @@ export const CHALLENGES: readonly Challenge[] = [
     brief: 'Two parents, one child, gene by gene — and the child is not an average of them.',
     task: 'In the stepper, step to a crossover and read the gene strips: parent, parent, child.',
     setup: { stage: 'explorer', focus: 'stepper' },
-    success: { metric: 'generations', op: '>=', value: 1 },
+    success: { metric: 'stepperCrossovers', op: '>=', value: 1 },
     afterword: {
       text:
         'Each gene lands somewhere between the two parents, usually close to one of them rather ' +
