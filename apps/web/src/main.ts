@@ -27,6 +27,10 @@ import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
 import { cellAt, drawArchive, type ArchiveView } from './render/archive.ts';
 import { attachOrbit, createScrubber } from './render/three/controls.ts';
+import { drawFootfall } from './render/gait/footfall.ts';
+import { drawTraces } from './render/gait/traces.ts';
+import { drawPortrait } from './render/gait/portrait.ts';
+import { plotRect, xToFrame } from './render/gait/common.ts';
 import type { OrbitHandle } from './render/three/controls.ts';
 import type { ThreeView } from './render/three/scene.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
@@ -184,18 +188,25 @@ function respawn(): void {
   if (state.mode === 'manual') {
     sim = new Sim(morph, { tilt: new Rng(state.seed).range(-0.02, 0.02) });
   } else {
-    // Twice the trial length, matching what the live replay used to loop at — a champion
-    // scored over four seconds is more interesting for the four after it, where a gait that
-    // was merely surviving tends to stop.
+    // Exactly the scored trial length — **not** twice it, which is what slice 9 recorded.
+    //
+    // Slice 10 puts a duty factor on the footfall diagram, and the behaviour map puts one on
+    // the cell beside it. Recording eight seconds of a four-second trial made those two
+    // numbers disagree (0.83 against 0.80) with nothing on screen to explain why. Matching
+    // the window is worth more than the extra four seconds of walking: the scrubber now
+    // shows the run that produced the numbers next to it, rather than a longer run that
+    // resembles it.
     const taped = evaluateGait(morph, activeGait(state), {
       seed: state.seed,
-      seconds: state.trialSeconds * 2,
+      seconds: state.trialSeconds,
       record: true,
     });
     recording = taped.recording;
     scrubber.attach(recording.frames, recording.hz);
   }
   el('scrub').classList.toggle('on', recording !== null);
+  el('gait').classList.toggle('on', recording !== null);
+  gaitPainted = -1;
 }
 
 /** The snapshot both renderers draw this frame, or null if there is nothing to draw yet. */
@@ -392,6 +403,67 @@ function queueUrl(): void {
   }, 250);
 }
 
+/* ---------------- gait analysis ---------------- */
+
+/**
+ * Three read-outs of *how* the champion walks, under the stage.
+ *
+ * **They call nothing.** Every number comes from the `Recording` the replay is already
+ * playing, so opening them costs no simulation — which is the whole reason slice 9's
+ * recorder captured joint angles and foot contacts it had no use for at the time.
+ *
+ * They share `playFrame` with the scrubber rather than keeping their own copy. Two time
+ * sources that can drift apart would be worse than one panel fewer.
+ */
+const gaitPanels = {
+  footfall: { canvas: el<HTMLCanvasElement>('g-footfall'), ctx: context2d(el<HTMLCanvasElement>('g-footfall')) },
+  traces: { canvas: el<HTMLCanvasElement>('g-traces'), ctx: context2d(el<HTMLCanvasElement>('g-traces')) },
+  portrait: { canvas: el<HTMLCanvasElement>('g-portrait'), ctx: context2d(el<HTMLCanvasElement>('g-portrait')) },
+};
+
+/** Frame last drawn, so a paused replay is not redrawn sixty times a second for nothing. */
+let gaitPainted = -1;
+
+function paintGait(): void {
+  if (!recording) return;
+  const frame = Math.round(playFrame);
+  if (frame === gaitPainted) return;
+  gaitPainted = frame;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  for (const [name, panel] of Object.entries(gaitPanels)) {
+    const rect = panel.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+
+    // Sized here rather than only in `resize()`, because the strip is display:none until a
+    // recording exists — at boot it measures zero, and a canvas fitted to zero stays a 0×0
+    // backing store that silently draws nothing however correct the rest of this is.
+    if (panel.canvas.width !== Math.round(rect.width * dpr)) fit(panel.canvas, panel.ctx, dpr);
+
+    if (name === 'footfall') drawFootfall(panel.ctx, recording, frame, rect.width, rect.height);
+    else if (name === 'traces') drawTraces(panel.ctx, recording, frame, rect.width, rect.height);
+    else drawPortrait(panel.ctx, recording, frame, rect.width, rect.height);
+  }
+}
+
+/**
+ * Click either time panel to seek there.
+ *
+ * `xToFrame` is the exact inverse of the mapping the panels draw with, so the frame under
+ * the pointer is the frame that gets drawn — no rounding drift between clicking and seeing.
+ */
+for (const panel of [gaitPanels.footfall, gaitPanels.traces]) {
+  panel.canvas.addEventListener('click', (e) => {
+    if (!recording) return;
+    const rect = panel.canvas.getBoundingClientRect();
+    playFrame = xToFrame(plotRect(rect.width, rect.height), recording, e.clientX - rect.left);
+    // Seeking implies pausing, exactly as dragging the scrubber does.
+    playing = false;
+    scrubber.show(Math.round(playFrame), false);
+    gaitPainted = -1;
+  });
+}
+
 /* ---------------- the 3D view ---------------- */
 
 /**
@@ -461,6 +533,8 @@ function resize(): void {
   // Three owns its own drawing buffer, so it resizes itself rather than going through fit().
   const r3 = stage3d.getBoundingClientRect();
   threeView?.resize(r3.width, r3.height);
+  for (const panel of Object.values(gaitPanels)) fit(panel.canvas, panel.ctx, dpr);
+  gaitPainted = -1;
 }
 
 function frame(now: number): void {
@@ -518,6 +592,7 @@ function frame(now: number): void {
   });
   paintStats();
   paintArchive();
+  paintGait();
 }
 
 /* ---------------- behaviour map ---------------- */

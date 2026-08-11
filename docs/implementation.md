@@ -1860,89 +1860,125 @@ allocation sites are in front of us is cheaper than reconstructing the list late
 
 ## Slice 10 — Gait analysis
 
-> **Status: next.** One or two sessions. Almost entirely drawing: the data already exists.
+> **Status: built.** One session. As predicted, almost entirely drawing.
 
 ### Goal
 
 Three read-outs of *how* a gait works, sharing one scrubber with the replay — a footfall
-diagram, joint-angle traces, and a hip phase portrait. §10 of the design document.
+diagram, joint-angle traces, and a hip phase portrait. Fig 9.7 of the design document.
 
 ### Depends on
 
-Slice 9's `Recording`, which was deliberately built wider than the 3D replay needed. Every
-number this slice draws is already captured:
+Slice 9's `Recording`, and nothing else. Every number here was already captured:
 
-| Panel | Reads |
-|---|---|
-| footfall diagram | `contact` — `frames × 2`, already sampled at 60 Hz |
-| joint-angle traces | `jointAngles` — `frames × joints` |
-| phase portrait | `jointAngles` for `hipL`, differentiated |
+| Panel | Reads | Drawn as |
+|---|---|---|
+| footfall diagram | `contact` — `frames × 2` | two lanes, filled where the foot is down |
+| joint-angle traces | `jointAngles` — `frames × joints` | six series, one shared y-axis, degrees |
+| phase portrait | `jointAngles` for `hipL`, differentiated | angle against rate, fading with time |
 
-**Nothing needs re-running.** If this slice finds itself calling `evaluate` again, something
-has gone wrong — check whether the recording is being thrown away on a mode switch.
+**Nothing re-runs.** A test asserts it: every file under `render/gait/` is scanned for
+`evaluate(`, `new Sim` and `stepControlled`, and the only runtime imports permitted from
+`@evolab/sim` are the two duty helpers. That is a crude test and it guards the one property
+the whole slice rests on — the moment a panel simulates, watching a gait costs as much as
+evolving one and the panels start competing with the search for the main thread.
 
-### Design
+### One time axis, shared
 
-```
-apps/web/src/render/gait/
-  footfall.ts    stance bars per foot against time
-  traces.ts      six joint-angle series, shared y-axis
-  portrait.ts    hip angle against hip angular velocity
-```
+`common.ts` owns `frameToX` and `xToFrame`, and the footfall diagram and the traces both
+import them. They sit stacked in a single grid column so their widths are identical, which
+means their time axes are identical, which means **a reader can draw a vertical line down the
+two with their eye.** If each computed its own mapping, two panels a few pixels apart would
+disagree about where 2.4 s is and the stacking would be pointless.
 
-All three are canvas, hand-rolled, same as `chart.ts` and `archive.ts`. All three take a
-`Recording` and a current frame, and draw a playhead at that frame. None of them owns a clock
-or a scrubber — `main.ts` already has one, and a second timeline that drifts from the first
-would be worse than no timeline.
+`xToFrame` is the exact inverse of `frameToX`, so clicking a footfall bar seeks to the frame
+under the pointer rather than near it — verified at 75% along the axis landing on frame 180
+of 240. Clicking pauses, exactly as dragging the scrubber does.
 
-**The footfall diagram is the one that teaches.** Two horizontal bars, filled where the foot
-is down. Duty factor is visibly the fraction of the bar that is filled, and the phase offset
-between the two feet is visibly the thing that makes it a walk rather than a hop — which
-turns the behaviour archive's y-axis from a number into a picture. Draw the archive's duty
-figure on it as a caption so the two agree out loud.
+There is **one frame index in the app**, `playFrame` in `main.ts`. The panels are passed it;
+none keeps a copy.
 
-**The phase portrait is the one that looks impressive and teaches least.** A converged gait
-draws a closed loop and a falling one draws a spiral into the origin. That is genuinely
-striking, and it is also the panel to cut first if the slice runs long.
+### The recording now matches the trial that was scored
 
-### Where it goes
+Slice 9 recorded `trialSeconds * 2`, inherited from what the live replay used to loop at.
+That was fine while the recording was only a picture. It stopped being fine the moment this
+slice printed a **duty factor** on the footfall diagram, because the behaviour map prints one
+on the cell beside it — and measured over eight seconds of a four-second trial they disagreed,
+0.83 against 0.80, with nothing on screen to explain why.
 
-The right-hand column is already full — chart, run stats, islands, behaviour map, champion.
-These three panels need horizontal space and a shared time axis with the scrubber, so they
-belong **under the stage**, in a strip that appears with the scrubber and collapses with it.
-That makes the stage shorter; check the 3D view still frames the robot at the reduced height
-before deciding it is fine.
+`respawn` now records exactly `trialSeconds`. The scrubber shows *the run that produced the
+numbers next to it*, rather than a longer run that resembles it. The four seconds of extra
+walking were worth less than the two figures agreeing.
 
-### Watch for
+A residual gap of about half a percentage point remains and is not a bug: the trial counts
+stance at 240 Hz and the recording stores it at 60 Hz, so a touchdown landing between samples
+rounds to the nearest frame. The footfall caption states the window it measured over, and the
+test bounds the gap at one percentage point **explicitly** rather than via
+`toBeCloseTo(_, 2)` — that allows 0.005 and the measured gap is 0.0047, which would have made
+the test fail on a breeze rather than on a regression.
 
-- **One scrubber, one frame index.** `playFrame` already lives in `main.ts`. Pass it in; do
-  not let a panel keep its own copy, or dragging one will desynchronise the others.
-- **The recording is per-champion and is thrown away on `respawn`.** If the analysis panels
-  are open in manual mode there is no recording at all — decide whether they hide, or whether
-  manual mode starts recording too. Hiding is cheaper and honest; recording on every slider
-  drag is the thing slice 9 specifically avoided.
-- **Ghost overlays go in the 3D view, not here.** `MAX_INSTANCES` is 64 and the biped is 7,
-  so up to eight ghosts fit without touching `scene.ts` — but `coloured` in the render loop
-  is a one-shot flag and will need to become per-instance when ghosts arrive.
-- **Do not add a fourth descriptor to the archive** because the traces make one look easy.
-  A 24 × 24 grid is legible; a third axis is 13,824 cells and cannot be blitted.
+### Where it went
+
+A strip under the stage, 192 px, present only when a recording exists. In manual mode the
+replay is live and there is nothing to scrub, so the panels are **absent rather than blank** —
+and recording on every slider drag is precisely what slice 9 avoided.
+
+The split between the footfall diagram and the traces is not even: two stance bars need far
+less height than six overlaid curves. Footfall is a fixed 76 px and the traces take the rest.
+
+The stage loses 192 px, down to 666 px at 1440 × 900. The 3D view still frames the robot with
+room to spare, which was the thing the previous slice's notes said to check.
+
+### Decisions worth keeping
+
+- **One shared y-axis for all six joint traces, not six strips.** The comparison worth making
+  is *between* joints — the hip leads, the knee follows, the ankle does almost nothing on most
+  evolved gaits. Six separate scales would hide exactly that by making a 4° ankle wiggle look
+  the same size as a 40° hip sweep.
+- **Colour by joint kind, dashed for the far leg.** Three shapes to track, not six.
+- **Degrees on the traces**, radians everywhere else in the project. Nobody reads a gait in
+  radians, and this panel exists to be read.
+- **`dutyFromRecording` lives in `packages/sim`**, not in the renderer, so the number printed
+  on the diagram and the number the archive filed are the same function and a test can hold
+  them against each other.
+- **The phase portrait was kept.** It teaches least and looks most impressive, exactly as the
+  sketch predicted. It earns its place on one property the footfall diagram cannot show:
+  periodicity. A converged gait draws a closed loop; one still falling over draws a spiral
+  that never closes.
+
+### A bug the tests found
+
+`xToFrame` could name a frame that does not exist. The `max(1, …)` guarding against a
+divide-by-zero on a one-frame recording let a click at the right-hand edge return frame 1 of a
+recording that only has frame 0. Harmless downstream — `snapshotAt` clamps too — but a
+function that can name a frame nobody has is a trap for the next caller. Found by writing the
+single-frame test, not by seeing it.
 
 ### Done when
 
-- [ ] Footfall diagram, joint traces and phase portrait draw from a `Recording`.
-- [ ] All three share the replay's scrubber and its playhead, with no second time source.
-- [ ] The duty factor read off the footfall diagram matches the archive's number for the same
-      genome — asserted in a test, not by eye.
-- [ ] Nothing in the slice calls `evaluate`.
-- [ ] The panels are absent, not blank, when there is no recording.
+- [x] Footfall diagram, joint traces and phase portrait draw from a `Recording`.
+- [x] All three share the replay's scrubber and its playhead, with no second time source.
+- [x] The duty factor on the footfall diagram matches the archive's number for the same
+      genome — bounded in a test at one percentage point, with the sampling gap explained.
+- [x] Nothing in the slice calls `evaluate` — asserted structurally over the source files.
+- [x] The panels are absent, not blank, when there is no recording.
+- [x] Click either time panel to seek; 75% along the axis lands on frame 180 of 240.
+- [x] 174 tests pass and the golden number is still 6.4598.
 
 ### Deliberately not in this slice
 
-No CSV or JSON export. It is a personal project with a URL round-trip; the server is slice 12
-and export without somewhere to put it is a menu item nobody clicks.
+No CSV or JSON export. The server is slice 12, and export without somewhere to put it is a
+menu item nobody clicks.
 
 No comparison of two gaits side by side. That wants two recordings and a diffing UI, and it
-is a much better fit once the community archive exists.
+fits much better once the community archive exists.
+
+**No ghost overlays.** They belong in the 3D view rather than here. `MAX_INSTANCES` is already
+64 against a 7-body biped, so up to eight ghosts fit without touching `scene.ts` — but
+`coloured` in its render loop is a one-shot flag and will have to become per-instance.
+
+**No fourth behaviour descriptor**, however easy the traces make one look. A 24 × 24 grid is
+legible; a third axis is 13,824 cells and cannot be blitted.
 
 ---
 
@@ -1952,7 +1988,7 @@ Sketches only. Each will be written out fully at the end of the slice before it.
 
 | # | Name | Shape of the work |
 |---|---|---|
-| 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. |
+| 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. It is the first slice since 6 that adds *teaching* rather than instrumentation — everything needed to show a learner what went wrong now exists. |
 | 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. It is also where §12's four remaining *slice 12* rows — backend, server data, storage, deploy — stop being plans. |
 | 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |
 | 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |

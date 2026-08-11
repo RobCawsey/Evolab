@@ -6,6 +6,8 @@ import {
   Sim,
   TIMESTEP,
   contactAt,
+  dutyFromRecording,
+  dutyPerFoot,
   evaluate,
   initPhysics,
   snapshotAt,
@@ -123,8 +125,11 @@ describe('recording a trial', () => {
   });
 
   it('records foot contact, and it agrees with the duty factor', () => {
-    // Same measurement the behaviour archive keys on, sampled at 60 Hz instead of 240. If
-    // these drifted apart, slice 10's footfall diagram would contradict slice 8's map.
+    // Same measurement the behaviour archive keys on, sampled at 60 Hz instead of 240.
+    //
+    // `dutyFromRecording` is the function slice 10's footfall diagram prints, so this is the
+    // test that stops the diagram claiming one duty while the map beside it claims another.
+    // Counted by hand here as well, because a function agreeing with itself proves nothing.
     const trial = evaluate(morph, CHAMPION, { seed: 0, seconds: 4, record: true });
     const rec = trial.recording;
     let stance = 0;
@@ -132,8 +137,35 @@ describe('recording a trial', () => {
       if (contactAt(rec, f, 0)) stance++;
       if (contactAt(rec, f, 1)) stance++;
     }
-    const sampledDuty = stance / (rec.frames * 2);
-    expect(sampledDuty).toBeCloseTo(trial.dutyFactor, 1);
+    const byHand = stance / (rec.frames * 2);
+
+    expect(dutyFromRecording(rec)).toBeCloseTo(byHand, 12);
+
+    // Against the trial's own figure the agreement is close but not exact, and the gap is
+    // real rather than a bug: the trial counts stance at 240 Hz and the recording stores it
+    // at 60 Hz, so a touchdown landing between samples is rounded to the nearest frame.
+    // Bounded explicitly at one percentage point — `toBeCloseTo(_, 2)` allows 0.005 and the
+    // measured gap is 0.0047, which would make this test fail on a breeze rather than on a
+    // regression.
+    expect(Math.abs(dutyFromRecording(rec) - trial.dutyFactor)).toBeLessThan(0.01);
+  });
+
+  it('splits duty per foot, so an asymmetric gait is not hidden by the average', () => {
+    const trial = evaluate(morph, CHAMPION, { seed: 0, seconds: 4, record: true });
+    const [left, right] = dutyPerFoot(trial.recording);
+    // The mean of the two feet is the combined figure, by construction.
+    expect((left + right) / 2).toBeCloseTo(dutyFromRecording(trial.recording), 12);
+    // This champion walks, so both feet spend real time in the air and real time down.
+    for (const d of [left, right]) {
+      expect(d).toBeGreaterThan(0.3);
+      expect(d).toBeLessThan(1);
+    }
+  });
+
+  it('reports zero rather than dividing by zero on an empty recording', () => {
+    const empty = { ...evaluate(morph, CHAMPION, { seed: 0, seconds: 1, record: true }).recording, frames: 0 };
+    expect(dutyFromRecording(empty)).toBe(0);
+    expect(dutyPerFoot(empty)).toEqual([0, 0]);
   });
 
   it('trims to the frames it actually captured when the robot falls early', () => {

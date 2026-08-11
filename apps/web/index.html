@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 9</title>
+    <title>Evolab — slice 10</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -92,8 +92,32 @@
       aside.left.locked input[type="range"] { pointer-events: none; opacity: .55; }
 
       /* stage */
-      .stage-wrap { position: relative; min-width: 0; }
+      .stage-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+      .stage-box { position: relative; flex: 1; min-height: 0; }
       #stage { display: block; width: 100%; height: 100%; }
+
+      /*
+        The gait panels. Present only when there is a recording to draw — in manual mode the
+        replay is live and there is nothing to scrub, so they are absent rather than blank.
+
+        Footfall and traces share one column on purpose: identical width means an identical
+        time axis, so a reader can draw a vertical line down the two with their eye. The
+        phase portrait has no time axis and sits beside them.
+      */
+      .gait { display: none; flex: none; height: 192px; border-top: 1px solid var(--line);
+        background: var(--panel); }
+      .gait.on { display: grid; grid-template-columns: minmax(0, 2.3fr) minmax(0, 1fr); }
+      .gait-time { display: flex; flex-direction: column; min-width: 0;
+        border-right: 1px solid var(--line); }
+      /*
+        Two stance bars need far less height than six overlaid curves, so the split is not
+        even. An equal split left the traces at 60 px of plot for six series and a pair of
+        degree labels, which is legible only in the sense that the pixels are present.
+      */
+      #g-footfall { flex: none; height: 76px; }
+      #g-traces { flex: 1; min-height: 0; }
+      .gait canvas { display: block; width: 100%; cursor: crosshair; }
+      #g-portrait { height: 100%; cursor: default; }
       /*
         The two renderers occupy the same box and exactly one is shown. They draw the same
         Snapshot, so switching never reloads or reseeks anything — it is a visibility toggle
@@ -316,17 +340,26 @@
       </aside>
 
       <div class="stage-wrap">
-        <canvas id="stage"></canvas>
-        <canvas id="stage3d"></canvas>
-        <div class="scrub" id="scrub"></div>
-        <div id="hud">
-          <div><span>replay</span><b id="v-time">—</b></div>
-          <div><span>distance</span><b id="v-distance">—</b></div>
-          <div><span>gait phase</span><b id="v-phase">—</b></div>
-          <div><span>torso y</span><b id="v-height">—</b></div>
-          <div><span>state</span><b id="v-state">—</b></div>
+        <div class="stage-box">
+          <canvas id="stage"></canvas>
+          <canvas id="stage3d"></canvas>
+          <div class="scrub" id="scrub"></div>
+          <div id="hud">
+            <div><span>replay</span><b id="v-time">—</b></div>
+            <div><span>distance</span><b id="v-distance">—</b></div>
+            <div><span>gait phase</span><b id="v-phase">—</b></div>
+            <div><span>torso y</span><b id="v-height">—</b></div>
+            <div><span>state</span><b id="v-state">—</b></div>
+          </div>
+          <div class="badge" id="stage-badge">manual gait</div>
         </div>
-        <div class="badge" id="stage-badge">manual gait</div>
+        <div class="gait explorer-only" id="gait">
+          <div class="gait-time">
+            <canvas id="g-footfall"></canvas>
+            <canvas id="g-traces"></canvas>
+          </div>
+          <canvas id="g-portrait"></canvas>
+        </div>
       </div>
 
       <aside class="right">

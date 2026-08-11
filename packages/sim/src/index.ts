@@ -10,5 +10,7 @@ export type { Snapshot, BodyPose, JointAnchor, SimOptions } from './world.ts';
 export { stepControlled, CONTROL_EVERY } from './control.ts';
 export { evaluate, evaluateGait, makeEvaluator } from './evaluate.ts';
 export type { TrialOptions, RecordedTrial } from './evaluate.ts';
-export { createRecorder, snapshotAt, contactAt, timeAt, RECORD_HZ } from './record.ts';
+export {
+  createRecorder, snapshotAt, contactAt, dutyFromRecording, dutyPerFoot, timeAt, RECORD_HZ,
+} from './record.ts';
 export type { Recording, Recorder } from './record.ts';

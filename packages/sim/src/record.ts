@@ -118,6 +118,37 @@ export function contactAt(rec: Recording, frame: number, foot: 0 | 1): boolean {
   return rec.contact[f * 2 + foot] === 1;
 }
 
+/**
+ * Duty factor measured from the recording: stance frames over total, averaged across feet.
+ *
+ * The same quantity `TrialResult.dutyFactor` reports and the behaviour archive keys on, but
+ * counted at 60 Hz from the stored contact flags rather than at 240 Hz during the trial. The
+ * two agree to about a percentage point.
+ *
+ * It lives here rather than in the footfall renderer so that **the number printed on the
+ * diagram and the number the archive filed are the same function**, and a test can hold them
+ * against each other. A diagram that draws one duty factor while the map beside it claims
+ * another is worse than no diagram.
+ */
+export function dutyFromRecording(rec: Recording): number {
+  if (rec.frames === 0) return 0;
+  let stance = 0;
+  for (let i = 0; i < rec.frames * 2; i++) if (rec.contact[i] === 1) stance++;
+  return stance / (rec.frames * 2);
+}
+
+/** Per-foot duty, left then right. An asymmetric gait is invisible in the average. */
+export function dutyPerFoot(rec: Recording): [number, number] {
+  if (rec.frames === 0) return [0, 0];
+  let left = 0;
+  let right = 0;
+  for (let f = 0; f < rec.frames; f++) {
+    if (rec.contact[f * 2] === 1) left++;
+    if (rec.contact[f * 2 + 1] === 1) right++;
+  }
+  return [left / rec.frames, right / rec.frames];
+}
+
 /* ---------------- building one ---------------- */
 
 /**

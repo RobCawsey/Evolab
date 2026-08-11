@@ -18,6 +18,27 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 10 — "Gait analysis".** A strip under the stage — footfall diagram, six joint-angle
+traces, hip phase portrait — present only when there is a recording to draw. In manual mode
+the replay is live and there is nothing to scrub, so the panels are absent rather than blank.
+
+**Nothing in this slice re-runs the simulation**, and a test enforces it: every file under
+`render/gait/` is scanned for `evaluate(`, `new Sim` and `stepControlled`, and the only
+runtime imports allowed from `@evolab/sim` are the two duty helpers. The moment a panel
+simulates, watching a gait costs as much as evolving one.
+
+**One time axis, one frame index.** `common.ts` owns `frameToX`/`xToFrame`; the footfall
+diagram and traces share a grid column so their widths — and therefore their axes — are
+identical, and a reader can draw a vertical line down the two with their eye. `playFrame`
+lives in `main.ts` and the panels are passed it; none keeps a copy.
+
+**The replay now records exactly `trialSeconds`, not twice it.** Slice 9's doubled window
+made the footfall diagram's duty factor disagree with the behaviour map's cell beside it —
+0.83 against 0.80 — with nothing on screen to explain why. The scrubber now shows the run that
+produced the numbers next to it. A residual half-percentage-point gap remains because the
+trial counts stance at 240 Hz and the recording stores it at 60 Hz; the caption states the
+window and a test bounds the gap explicitly at one point.
+
 **Slice 9 — "3D replay".** A `2D`/`3D` toggle in the toolbar (or `2`/`3`) swaps the stage for
 an orbitable Three.js scene: drag to turn, wheel to zoom, double-click to reset. Champions
 play back from a **recorded trial** with a scrubber; manual gaits still play live, because
@@ -155,12 +176,12 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 10 — gait analysis. Specified in
-[docs/implementation.md](docs/implementation.md#slice-10--gait-analysis).
+Next: slice 11 — the challenge track. Specified in
+[docs/implementation.md](docs/implementation.md#slices-1114--later-stages).
 
-Slice 10 is almost entirely drawing: the footfall diagram, joint traces and phase portrait
-all read the `Recording` slice 9 already captures. **If that slice finds itself calling
-`evaluate`, something has gone wrong.**
+It is the first slice since 6 that adds **teaching** rather than instrumentation. Everything
+needed to show a learner what went wrong now exists: the stepper shows the operators, the
+archive shows what else was found, and the gait panels show how the winner actually moved.
 
 Slice 8 was the natural stopping point. Everything from here changes how the search is
 watched, not how it works.
@@ -232,7 +253,7 @@ npm run check        # typecheck everything
 npm run sim          # headless: step the biped in Node, print positions
 ```
 
-`npm test` is 165 tests in about 1.5 s, so there is no excuse for not running it. It covers
+`npm test` is 174 tests in about 1.5 s, so there is no excuse for not running it. It covers
 the RNG (including a pinned golden vector), the controller, the morphology, the archive, the
 trajectory recording, and the physics — the last of these builds real Rapier worlds and is
 still fast enough to sit in the inner loop. It also covers `render/three/bodies.ts` under
