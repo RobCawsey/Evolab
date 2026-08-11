@@ -2,8 +2,8 @@
  * The message protocol between the main thread and the island workers.
  *
  * Raw `postMessage` with a discriminated union. Comlink would turn this into typed method
- * calls, but the protocol is six messages wide and the one thing that genuinely needs care
- * — which buffers get transferred — is exactly what an RPC wrapper hides.
+ * calls, but the protocol is nine message types across two unions and the one thing that
+ * genuinely needs care — which buffers get transferred — is exactly what an RPC wrapper hides.
  *
  * Every genome payload is a `Float32Array` and is **transferred**, not copied. A transferred
  * `ArrayBuffer` is detached on the sending side, so senders must hand over a copy they no

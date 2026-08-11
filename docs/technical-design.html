@@ -1227,46 +1227,94 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
   <div class="sechead"><p class="eyebrow">12 &mdash; Stack</p>
     <h2>Choices and the reason for each</h2></div>
   <div class="tbl"><table>
-    <thead><tr><th>Layer</th><th>Choice</th><th>Why this and not the obvious alternative</th></tr></thead>
+    <thead><tr><th>Layer</th><th>Choice</th><th>Status</th><th>Why this and not the obvious alternative</th></tr></thead>
     <tbody>
-      <tr><td>Language</td><td>TypeScript, strict</td><td>Genome and morphology schemas are the app's
+      <tr><td>Language</td><td>TypeScript, strict</td><td><span class="tag t-ok">in use</span></td>
+        <td>Genome and morphology schemas are the app's
         contract across four thread boundaries; they need to be checked.</td></tr>
-      <tr><td>Framework</td><td>React 19 + Vite</td><td>Ecosystem depth for R3F and the panel system.
-        The heavy work is off-thread, so framework overhead is not the bottleneck.
-        <br><span style="color:var(--violet)"><strong>Amended, slice 7:</strong> Vite, no React. The
-        panels are plain DOM built by functions that take state and return an update method. React
-        was carried as a deferral through six slices and never became the cheaper option — the body
-        editor was the trigger condition, and it landed in about 200 lines without one. Recorded
-        here because the 3D row above depends on it: no React means no react-three-fiber.</span></td></tr>
-      <tr><td>3D</td><td>Three.js via react-three-fiber</td><td>Declarative scene graph keeps the
-        replay in sync with app state without an imperative bridge to maintain.
-        <br><span style="color:var(--violet)"><strong>Amended, slice 9:</strong> Three.js directly.
-        R3F needs React, which this project does not have. The bridge it would have saved turned out
-        to be one function — the renderer takes a <span class="mono">Snapshot</span> and holds no
-        app state, so there is nothing to keep in sync.</span></td></tr>
-      <tr><td>Evolution</td><td>Plain TypeScript, no framework</td><td>Pure functions in one
+      <tr><td>Framework</td><td>Vite only — no UI framework</td><td><span class="tag t-ok">in use</span></td>
+        <td><em>Was: React 19 + Vite — ecosystem depth for R3F and the panel system.</em>
+        <br><span style="color:var(--violet)"><strong>Amended, slice 7:</strong> no React. Panels are
+        plain DOM built by functions that take state and return an <span class="mono">update</span>
+        method. React was carried as a deferral through six slices and never became the cheaper
+        option — the body editor was the trigger condition, and it landed in about 200 lines without
+        one. The 3D row below depends on this: no React means no react-three-fiber.</span></td></tr>
+      <tr><td>3D</td><td>Three.js, used directly</td><td><span class="tag t-ok">in use</span></td>
+        <td><em>Was: Three.js via react-three-fiber — a declarative scene graph to keep the replay in
+        sync with app state.</em>
+        <br><span style="color:var(--violet)"><strong>Amended, slice 9:</strong> R3F needs React. The
+        imperative bridge it would have saved turned out to be one function — the renderer takes a
+        <span class="mono">Snapshot</span> and holds no app state, so there is nothing to keep in
+        sync. Loaded by dynamic <span class="mono">import()</span>, so it is absent from the first
+        paint.</span></td></tr>
+      <tr><td>Evolution</td><td>Plain TypeScript, no framework</td><td><span class="tag t-ok">in use</span></td>
+        <td>Pure functions in one
         package. Was a Rust/WASM kernel until v2.0 — §2 records why that reversed.</td></tr>
-      <tr><td>Physics</td><td><span class="mono">@dimforge/rapier2d-compat</span></td><td>The same
-        Rust engine, compiled and published by its authors. We consume it, we do not build it.</td></tr>
-      <tr><td>Backend</td><td>.NET 10, one Minimal API project</td><td>Stores and shares runs.
-        No evolution, no queue, no hub, no auth until publishing exists — §5.</td></tr>
-      <tr><td>Server data</td><td>SQLite + EF Core, files on disk</td><td>Correct at this scale and
+      <tr><td>Physics</td><td><span class="mono">@dimforge/rapier2d-compat</span></td><td><span class="tag t-ok">in use</span></td>
+        <td>The same Rust engine, compiled and published by its authors. We consume it, we do not
+        build it. <span class="mono">rapier3d-compat</span> was dropped with the 3D physics mode — §4.</td></tr>
+      <tr><td>Charts</td><td>Hand-rolled Canvas 2D</td><td><span class="tag t-ok">in use</span></td>
+        <td><em>Was: uPlot + hand-rolled Canvas — streaming fitness data at scale, where D3-in-SVG
+        cannot hold 60 Hz updates over 50k points.</em>
+        <br><span style="color:var(--violet)"><strong>Amended, slice 3:</strong> uPlot was never
+        installed. The 50k-point case has not arrived and probably will not — a 40-generation run is
+        40 points and three series. Drawing it by hand keeps every decision about what the reader
+        sees inside one 160-line file, which matters more here than it would in a product. The
+        behaviour map (§3) is the same argument: one <span class="mono">ImageData</span> blit rather
+        than a charting library.</span></td></tr>
+      <tr><td>State</td><td>One mutable object, threaded explicitly</td><td><span class="tag t-ok">in use</span></td>
+        <td><em>Was: Zustand + immer — small, transient, worker-fed state without Redux ceremony.</em>
+        <br><span style="color:var(--violet)"><strong>Dropped, slice 7:</strong> a consequence of no
+        React. A store exists to trigger re-renders; with no re-render there is no problem to solve.
+        State is a single <span class="mono">RunState</span> passed to the functions that read it,
+        and the workers own the only state that is genuinely concurrent.</span></td></tr>
+      <tr><td>Workers</td><td>Raw <span class="mono">postMessage</span>, discriminated union</td><td><span class="tag t-ok">in use</span></td>
+        <td><em>Was: Comlink — typed calls over the message protocol, keeping transferables explicit.</em>
+        <br><span style="color:var(--violet)"><strong>Dropped, slice 4:</strong> nine message types
+        across two unions, and the one thing that genuinely needs care — which
+        <span class="mono">ArrayBuffer</span>s get transferred and therefore detached — is exactly
+        what an RPC wrapper hides. Writing it out makes every transfer visible at its call site;
+        slice 8's archive deltas transfer five buffers per generation and it stayed obvious.</span></td></tr>
+      <tr><td>Storage</td><td>The URL</td><td><span class="tag t-am">slice 12</span></td>
+        <td><em>Planned: Dexie + OPFS — structured queries and large binaries have genuinely
+        different needs.</em>
+        <br><span style="color:var(--violet)"><strong>Not built.</strong> Gait, body, seed, goal,
+        stage and view all round-trip through query parameters, which is enough for one user and
+        makes a run shareable by pasting a link. Real storage arrives with the server, and slice 9's
+        recorded trajectories — about 40 KB each — are the first thing that will actually want
+        it.</span></td></tr>
+      <tr><td>Testing</td><td>Vitest — 165 tests, one golden run</td><td><span class="tag t-ok">in use</span></td>
+        <td>The evolution module is pure, so it
+        tests in Node in milliseconds — the whole suite is 1.5 s. The golden fitness sequence is
+        still the single highest-value test in the project — §4.</td></tr>
+      <tr><td>Backend</td><td>.NET 10, one Minimal API project</td><td><span class="tag t-am">slice 12</span></td>
+        <td>Stores and shares runs. No evolution, no queue, no hub, no auth until publishing
+        exists — §5. Nothing before that slice needs .NET installed at all.</td></tr>
+      <tr><td>Server data</td><td>SQLite + EF Core, files on disk</td><td><span class="tag t-am">slice 12</span></td>
+        <td>Correct at this scale and
         far past it. Swapping provider is a connection string if that ever changes.</td></tr>
-      <tr><td>Charts</td><td>uPlot + hand-rolled Canvas</td><td>Streaming fitness data at scale.
-        D3-in-SVG cannot hold 60 Hz updates over 50k points.</td></tr>
-      <tr><td>State</td><td>Zustand + immer</td><td>Small, transient, worker-fed state. Redux
-        ceremony buys nothing here.</td></tr>
-      <tr><td>Workers</td><td>Comlink</td><td>Turns the message protocol into typed calls, keeping
-        transferables explicit where they matter.</td></tr>
-      <tr><td>Storage</td><td>Dexie + OPFS</td><td>Structured queries and large binaries have
-        genuinely different needs. See §9.</td></tr>
-      <tr><td>Testing</td><td>Vitest + one golden run</td><td>The evolution module is pure, so it
-        tests in Node in milliseconds. The golden fitness sequence is the single highest-value test
-        in the project — §4.</td></tr>
-      <tr><td>Deploy</td><td><span class="mono">dotnet publish</span> to one VPS</td><td>The server
-        hosts the built SPA, so there is one artefact, one origin and no CORS.</td></tr>
+      <tr><td>Deploy</td><td><span class="mono">dotnet publish</span> to one VPS</td><td><span class="tag t-am">slice 12</span></td>
+        <td>The server hosts the built SPA, so there is one artefact, one origin and no CORS.</td></tr>
     </tbody>
   </table></div>
+  <div class="col stack" style="margin-top:18px">
+    <p>The status column answers one question — is this running today? <span class="tag t-ok">in
+    use</span> means installed and working; the whole project has five dependencies, TypeScript,
+    Vitest, Vite, Three and <span class="mono">rapier2d-compat</span>, plus two packages of type
+    definitions. <span class="tag t-am">slice 12</span> means it is still the plan and simply is not
+    built. Where the choice itself changed, the superseded one is kept in italics above a violet
+    note saying why — the original reasoning stays readable rather than being quietly overwritten.</p>
+    <p><strong>Five of these thirteen rows named a library that never arrived</strong> — React,
+    react-three-fiber, uPlot, Zustand and Comlink. Three of the five fell out of a single decision
+    rather than being reconsidered on their own merits, and that is the honest shape of it: a UI
+    framework is not one choice, it is three, and dropping React takes the state store and the
+    scene-graph binding with it.</p>
+    <p>The other two were independent and are the more interesting ones. Comlink lost because the
+    abstraction hid the only hard part — buffer transfer. uPlot lost to the teaching goal:
+    hand-rolling a chart is indefensible in a product and correct here, because the file is also
+    the explanation. Neither would have been the wrong call on a team; both are the right call for
+    a project whose output is partly the reasoning.</p>
+  </div>
 </section>
 
 <section id="plan">

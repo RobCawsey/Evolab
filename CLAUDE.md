@@ -177,6 +177,12 @@ Two rules the GA earned the hard way, both written up in the slice 2 section:
 Before starting a slice, read its section. After finishing one, rewrite that section to
 describe what was actually built and expand the next one.
 
+**§12 of the design document is now audited against `package.json`.** The stack table has a
+status column, and the whole project has five dependencies: TypeScript, Vitest, Vite, Three and
+`rapier2d-compat`. Five of its thirteen rows named a library that never arrived — React,
+react-three-fiber, uPlot, Zustand and Comlink — and three of those trace to the single decision
+not to use React. If a dependency is added, that table is the thing to update.
+
 ## Invariants
 
 These are the rules that must survive between sessions. Breaking one is a bug even when
