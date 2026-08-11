@@ -23,6 +23,12 @@ export type Mode = 'manual' | 'evolved' | 'first';
 
 export type AppStage = 'guided' | 'explorer' | 'lab';
 
+/**
+ * Which renderer is on. Purely a view choice — the physics is the same 2D simulation in
+ * both, and the 3D view says so rather than hiding it. See the slice 9 notes.
+ */
+export type ReplayView = '2d' | '3d';
+
 /** One point on the fitness chart: the ring aggregated at a generation boundary. */
 export interface HistoryPoint {
   readonly generation: number;
@@ -46,6 +52,7 @@ export interface RunState {
   manualGait: GaitParams;
   /** guided / explorer / lab. Freely switchable, nothing locked — section 7. */
   stage: AppStage;
+  view: ReplayView;
   preset: Preset;
   /**
    * Best of generation 0, kept for the before-and-after in guided step 4.
@@ -69,6 +76,7 @@ export interface RunOptions {
   manualGait?: GaitParams;
   mode?: Mode;
   stage?: AppStage;
+  view?: ReplayView;
   preset?: Preset;
 }
 
@@ -85,6 +93,7 @@ export function createRunState(opts: RunOptions = {}): RunState {
     workers: opts.workers ?? defaultWorkerCount(),
     mode: opts.mode ?? 'manual',
     stage: opts.stage ?? 'guided',
+    view: opts.view ?? '2d',
     preset: opts.preset ?? DEFAULT_PRESET,
     firstChampion: null,
     manualGait: opts.manualGait ?? defaultGait(),

@@ -1704,8 +1704,7 @@ tab's worth of work whenever they are actually wanted.
 
 ## Slice 9 — 3D replay
 
-> **Status: next.** Two or three sessions. The largest single slice in the project, and the
-> first one that can make everything before it slower without making anything better.
+> **Status: built.** One session.
 
 ### Goal
 
@@ -1714,13 +1713,10 @@ the 2D view stays exactly as it is. §9 of the design document.
 
 ### Depends on
 
-Everything. The archive is the last slice that changes how the search works; this one only
+Everything. The archive was the last slice that changed how the search works; this one only
 changes how it is watched.
 
-### Decided: render in 3D, keep simulating in 2D
-
-**Settled before the slice starts, not during it.** This is the one choice here that is
-expensive to reverse, so it is recorded rather than left to whoever opens the file.
+### Decided before the slice started: render in 3D, keep simulating in 2D
 
 The alternative was real: move to `rapier3d`, give the morphology a third dimension and roll
 joints, and let the biped fall sideways. That is more honest physics. It also invalidates
@@ -1728,105 +1724,229 @@ every fitness number in the project, re-pins the golden test, and costs a slice 
 before anything walks again — all to buy a failure mode the eleven-gene sagittal genome has
 **no way to correct**. The controller has no lateral term, so a robot that can fall sideways
 will simply fall sideways, and evolution cannot fix it because nothing in the genome moves
-in that axis. Spending the largest slice in the project on a strictly worse robot is the
-kind of trade that looks like rigour and is not.
+in that axis.
 
-So: the sagittal simulation stays exactly as it is. The renderer extrudes each segment into
-a box and separates the legs properly in z, instead of nudging the far leg sideways with
-`FAR_LEG_RENDER_OFFSET`. Every number in the project stays valid, the golden test stays
-meaningful, and the slice ships without a rewrite underneath it.
+The cost is visible and is not hidden: orbit round to the front and the legs are perfectly
+aligned laterally, because they can never be anything else. That belongs in §9 of the design
+document as an amendment, the way slice 7 amended §12 about React.
 
-The cost is real and must be **stated in the UI, not hidden**: orbit the camera to the front
-and the robot visibly cannot fall sideways. *"Why is it flat?"* is the first question any
-reader will ask, and an unanswered one teaches them the project is sloppy rather than
-deliberate. Write the reasoning into §9 of the design document as an amendment, the way
-slice 7 amended §12 about React.
+Revisit only if the genome grows a lateral term.
 
-Revisit only if the genome grows a lateral term — slice 14 territory at the earliest, and a
-different project's worth of work in the controller before the physics question even
-matters.
-
-### Design
-
-Three.js, loaded **only when the 3D tab is first opened**. It is roughly 600 kB and the
-guided flow never needs it; a dynamic `import()` keeps it out of the first paint. That is
-also the test of whether the render layer is properly separated — if `render/three/` cannot
-be code-split out, something below `apps/web` has reached up into it.
+### What was built
 
 ```
 apps/web/src/render/three/
-  scene.ts      lights, ground grid, camera rig — built once, reused across replays
-  bodies.ts     Snapshot → instanced boxes; one InstancedMesh, not N meshes
-  controls.ts   orbit + the scrubber
+  bodies.ts     Snapshot → boxes. Imports nothing from Three. Tested under Node.
+  scene.ts      The only file in the project that imports Three. Dynamically imported.
+  controls.ts   Orbit and scrubber. Hand-rolled.
+packages/sim/src/record.ts    the trajectory format
 ```
 
-`Snapshot` already carries everything needed: id, x, y, angle, halfWidth, halfHeight, layer.
-The third dimension is a constant per `layer` — near leg at z = +0.09, far leg at z = −0.09,
-torso at 0 — so `bodies.ts` is a pure function from a snapshot to instance matrices and can
-be tested in Node without a canvas.
+**The split between `bodies.ts` and `scene.ts` is the point.** Every decision about how a 2D
+sagittal simulation becomes a 3D scene — where the legs sit in z, how deep a box is, what the
+camera looks at — is arithmetic on a `Snapshot`, so it lives in a module with no Three import
+and is checked in Node without a WebGL context. `scene.ts` is only the part that can be
+verified by looking at it. If `bodies.test.ts` ever becomes impossible to write, the render
+layer has stopped being separable.
 
-**The scrubber needs recorded frames, which do not exist yet.** `evaluate` currently returns
-numbers and throws the trajectory away. Add an opt-in:
+### Recording
+
+`evaluate` gained one option and it is **off by default**:
 
 ```ts
-evaluate(morph, genome, { seed, seconds, record: true })   // → TrialResult & { frames }
+evaluate(morph, genome, { seed, seconds, record: true })   // → TrialResult & { recording }
 ```
 
-recording one `Float32Array` per body per control tick (60 Hz, not 240 — four times fewer
-frames and nothing visible is lost). A 4-second trial is 240 frames × 7 bodies × 3 floats ≈
-20 kB, which is nothing. It must stay **off by default**: the inner loop runs tens of
-thousands of times per study and must not allocate.
+Overloads, so `record: true` narrows the return type and the search's call site is unchanged.
+Sampled at 60 Hz — every fourth physics step, the same cadence the controller runs at, so a
+recorded frame always lands on a tick where the joint targets had just been set rather than
+midway through the motors chasing them. A 4-second trial is about 40 kB.
 
-Slice 10's footfall diagram and joint-angle traces read the same recording, so the format is
-worth getting right here.
+Flat typed arrays with a stride, not an array of frame objects: 240 frames of 7 bodies is
+1,680 little objects that exist only to be read once by a renderer.
 
-### Watch for
+**The format is deliberately wider than the 3D replay needs.** It carries joint angles and
+per-foot contact flags as well as poses, because slice 10's joint-angle traces and footfall
+diagram read the same recording and re-running every trial later would be silly. A test
+asserts the recorded contact agrees with the duty factor the archive keys on — if those ever
+drift apart, slice 10's diagram would contradict slice 8's map.
 
-- **The replay loop is already fixed-timestep.** The 3D view renders whatever the accumulator
-  has stepped to; it does not get its own clock. Invariant 1 is not negotiable because
-  something has an orbit camera now.
-- **`FAR_LEG_RENDER_OFFSET` is 2D-only.** In 3D the legs are genuinely separated, so the fudge
-  must not be applied — and the convention note in `CLAUDE.md` about zeroing it when checking
-  a screen position against a world coordinate needs updating to say which renderer it means.
-- **One `InstancedMesh`.** Seven boxes per robot is nothing, but ghost overlays in slice 10
-  multiply that by however many ghosts, and retrofitting instancing later is worse than
-  starting with it.
-- **Dispose geometries and materials** when the tab closes. Three.js leaks GPU memory exactly
-  as enthusiastically as Rapier leaks WASM memory, and the lesson from `sim.dispose()` applies
-  unchanged.
+`snapshotAt(recording, frame)` rebuilds a `Snapshot`. That is what lets one scrubber drive
+both renderers: both take a `Snapshot`, so neither knows a recording exists, and they cannot
+interpolate the trajectory differently and drift apart at exactly the moment someone is
+comparing them frame by frame.
+
+### Two replay sources, and the mode picks
+
+- **Manual gaits play live.** Dragging a slider and watching the stride change on the next
+  step is the whole feedback loop the sliders exist for; restarting a recorded trial on every
+  input event would destroy it.
+- **Champions play from a recording**, at twice the trial length. A champion changes rarely,
+  and a recording is the only thing that can be scrubbed.
+
+The scrubber appears only when a recording exists. Dragging it pauses, because a playhead
+that runs away from the finger is useless.
+
+### Two bugs the browser found
+
+- **The camera eased into a seek.** Scrubbing to 5 s moves the robot eight metres between one
+  frame and the next, and a camera that lerps at 0.12 per frame spends half a second showing
+  empty grid — which reads as the seek having broken. It now snaps when the jump exceeds
+  1.5 m and smooths otherwise.
+- **The legs were outside the torso, not under it.** The first `lateralOffset` used the
+  torso's full half-width, which put the leg *centres* on the torso's side faces and gave the
+  robot a permanent wide stance that read as a deformity. Half of it puts a thigh's outer face
+  flush with the torso's side and its inner face on the centreline. Derived from the torso
+  either way, so the body editor's width slider moves the legs with it.
+
+Also worth recording: Vite warned that `controls.ts` was imported both statically and
+dynamically, so it never moved into its own chunk. The dynamic import was pointless —
+`controls.ts` imports only a *type* from `scene.ts` and so pulls in no Three at all. Only
+`scene.ts` needs to be dynamic.
+
+### Measured
+
+```
+dist/assets/index-*.js    1,608 kB     the app, including Rapier's inlined WASM
+dist/assets/scene-*.js      517 kB     Three, in its own chunk, loaded on first 3D open
+npm run evolve            9.24 s       was 9.37 s before recording existed
+champion fitness          6.4598       unchanged
+```
+
+The throughput figure is the evidence for the claim that `record` unset costs nothing; the
+difference is inside run-to-run noise.
 
 ### Done when
 
-- [ ] A 3D tab shows the champion walking, orbitable, with a ground plane and a grid.
-- [ ] Three.js is dynamically imported and absent from the initial bundle.
-- [ ] The 2D view is untouched and remains the default.
-- [ ] A scrubber seeks to any frame of a recorded trial and the 3D and 2D views agree on it.
-- [ ] `record: true` produces frames; `record` unset allocates nothing extra — asserted by a
-      test that counts allocations or, failing that, by a trials/s benchmark that has not moved.
-- [ ] `npm test` still passes and the golden number is still 6.4598, because none of this
-      touches the search.
+- [x] A 3D tab shows the champion walking, orbitable, with a ground plane and a grid.
+- [x] Three is dynamically imported and absent from the initial bundle — its own 517 kB chunk.
+- [x] The 2D view is untouched and remains the default.
+- [x] A scrubber seeks to any frame of a recorded trial and the 3D and 2D views agree on it —
+      verified by seeking to frame 300 and switching views: same pose, 7.75 m, 5.00 s in both.
+- [x] `record: true` produces frames; `record` unset produces no `recording` property and the
+      trials/s benchmark has not moved.
+- [x] A test steps a fresh sim alongside a recording and asserts every body, joint angle and
+      distance matches at all 121 frames — the recording *is* the trajectory, not a resample.
+- [x] `npm test` passes (165) and the golden number is still 6.4598.
 
 ### Deliberately not in this slice
 
-No 3D physics — see above, and write the reasoning down where a reader will find it.
+**No 3D physics.** See above; the reasoning is in §9 of the design document.
 
-No ghost overlays, no footfall diagram, no joint traces. Those are slice 10 and they all
-read the recording this slice defines; building the recording well is this slice's real
-contribution.
+**No ghost overlays, footfall diagram or joint traces.** Slice 10, and they all read the
+recording this slice defines. `MAX_INSTANCES` is already 64 rather than 7 so the instanced
+mesh does not need rebuilding when they arrive.
 
-No mesh import, no textures, no shadows beyond a single directional light. A grey box robot
-on a grid reads better for teaching than a styled one, and every hour spent on materials is
-an hour not spent on slice 10.
+**No shadow map, no textures, no mesh import.** A grey box robot on a grid reads better for
+teaching than a styled one, and shadows on an instanced mesh are a session of work for no
+clarity.
+
+**No `OrbitControls` from `examples/jsm`.** It is 1,300 lines handling touch pinch, damping,
+pan limits, keyboard and auto-rotate. What this needs is drag, wheel and a clamp at the poles
+— forty lines, and no second import path to keep bundled and typed. Take the library when the
+view grows a reason to need the rest.
+
+**`ThreeView.dispose()` is written but uncalled.** The view is created once and lives for the
+session; it holds no morphology, so not even the body editor can invalidate it. It exists
+because the first thing that *does* tear a scene down is slice 10, and writing it while the
+allocation sites are in front of us is cheaper than reconstructing the list later.
 
 ---
 
-## Slices 10–14 — Later stages
+## Slice 10 — Gait analysis
+
+> **Status: next.** One or two sessions. Almost entirely drawing: the data already exists.
+
+### Goal
+
+Three read-outs of *how* a gait works, sharing one scrubber with the replay — a footfall
+diagram, joint-angle traces, and a hip phase portrait. §10 of the design document.
+
+### Depends on
+
+Slice 9's `Recording`, which was deliberately built wider than the 3D replay needed. Every
+number this slice draws is already captured:
+
+| Panel | Reads |
+|---|---|
+| footfall diagram | `contact` — `frames × 2`, already sampled at 60 Hz |
+| joint-angle traces | `jointAngles` — `frames × joints` |
+| phase portrait | `jointAngles` for `hipL`, differentiated |
+
+**Nothing needs re-running.** If this slice finds itself calling `evaluate` again, something
+has gone wrong — check whether the recording is being thrown away on a mode switch.
+
+### Design
+
+```
+apps/web/src/render/gait/
+  footfall.ts    stance bars per foot against time
+  traces.ts      six joint-angle series, shared y-axis
+  portrait.ts    hip angle against hip angular velocity
+```
+
+All three are canvas, hand-rolled, same as `chart.ts` and `archive.ts`. All three take a
+`Recording` and a current frame, and draw a playhead at that frame. None of them owns a clock
+or a scrubber — `main.ts` already has one, and a second timeline that drifts from the first
+would be worse than no timeline.
+
+**The footfall diagram is the one that teaches.** Two horizontal bars, filled where the foot
+is down. Duty factor is visibly the fraction of the bar that is filled, and the phase offset
+between the two feet is visibly the thing that makes it a walk rather than a hop — which
+turns the behaviour archive's y-axis from a number into a picture. Draw the archive's duty
+figure on it as a caption so the two agree out loud.
+
+**The phase portrait is the one that looks impressive and teaches least.** A converged gait
+draws a closed loop and a falling one draws a spiral into the origin. That is genuinely
+striking, and it is also the panel to cut first if the slice runs long.
+
+### Where it goes
+
+The right-hand column is already full — chart, run stats, islands, behaviour map, champion.
+These three panels need horizontal space and a shared time axis with the scrubber, so they
+belong **under the stage**, in a strip that appears with the scrubber and collapses with it.
+That makes the stage shorter; check the 3D view still frames the robot at the reduced height
+before deciding it is fine.
+
+### Watch for
+
+- **One scrubber, one frame index.** `playFrame` already lives in `main.ts`. Pass it in; do
+  not let a panel keep its own copy, or dragging one will desynchronise the others.
+- **The recording is per-champion and is thrown away on `respawn`.** If the analysis panels
+  are open in manual mode there is no recording at all — decide whether they hide, or whether
+  manual mode starts recording too. Hiding is cheaper and honest; recording on every slider
+  drag is the thing slice 9 specifically avoided.
+- **Ghost overlays go in the 3D view, not here.** `MAX_INSTANCES` is 64 and the biped is 7,
+  so up to eight ghosts fit without touching `scene.ts` — but `coloured` in the render loop
+  is a one-shot flag and will need to become per-instance when ghosts arrive.
+- **Do not add a fourth descriptor to the archive** because the traces make one look easy.
+  A 24 × 24 grid is legible; a third axis is 13,824 cells and cannot be blitted.
+
+### Done when
+
+- [ ] Footfall diagram, joint traces and phase portrait draw from a `Recording`.
+- [ ] All three share the replay's scrubber and its playhead, with no second time source.
+- [ ] The duty factor read off the footfall diagram matches the archive's number for the same
+      genome — asserted in a test, not by eye.
+- [ ] Nothing in the slice calls `evaluate`.
+- [ ] The panels are absent, not blank, when there is no recording.
+
+### Deliberately not in this slice
+
+No CSV or JSON export. It is a personal project with a URL round-trip; the server is slice 12
+and export without somewhere to put it is a menu item nobody clicks.
+
+No comparison of two gaits side by side. That wants two recordings and a diffing UI, and it
+is a much better fit once the community archive exists.
+
+---
+
+## Slices 11–14 — Later stages
 
 Sketches only. Each will be written out fully at the end of the slice before it.
 
 | # | Name | Shape of the work |
 |---|---|---|
-| 10 | **Gait analysis** | Footfall diagram, joint-angle traces, hip phase portrait. All share one scrubber with the replay. Slice 8 already detects foot contact and slice 9 already records frames; this slice draws them. |
 | 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. |
 | 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. |
 | 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |

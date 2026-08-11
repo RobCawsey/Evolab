@@ -13,7 +13,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/__tests__/**/*.test.ts'],
+    // `apps/*` is here for `render/three/bodies.ts`, which is deliberately free of Three.js
+    // imports so the snapshot-to-boxes mapping can be checked without a WebGL context. Only
+    // modules that hold up that bargain belong in an app-level test.
+    include: ['packages/*/__tests__/**/*.test.ts', 'apps/*/__tests__/**/*.test.ts'],
     // The physics tests build and step real Rapier worlds; a few seconds each is normal.
     testTimeout: 30_000,
   },

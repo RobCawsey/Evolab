@@ -19,10 +19,16 @@ import {
   type BipedSpec,
   type GaitParams,
 } from '@evolab/evolution';
-import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
+import {
+  evaluateGait, initPhysics, Sim, snapshotAt, stepControlled, TIMESTEP,
+  type Recording, type Snapshot,
+} from '@evolab/sim';
 import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
 import { cellAt, drawArchive, type ArchiveView } from './render/archive.ts';
+import { attachOrbit, createScrubber } from './render/three/controls.ts';
+import type { OrbitHandle } from './render/three/controls.ts';
+import type { ThreeView } from './render/three/scene.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createGuided } from './ui/guided.ts';
@@ -38,6 +44,7 @@ const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as
 const stage = el<HTMLCanvasElement>('stage');
 const chart = el<HTMLCanvasElement>('chart');
 const archiveCanvas = el<HTMLCanvasElement>('archive');
+const stage3d = el<HTMLCanvasElement>('stage3d');
 
 function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const ctx = canvas.getContext('2d');
@@ -104,6 +111,7 @@ const state = createRunState({
   stage: (['guided', 'explorer', 'lab'] as const).includes(params.get('stage') as AppStage)
     ? (params.get('stage') as AppStage)
     : 'guided',
+  view: params.get('view') === '3d' ? '3d' : '2d',
 });
 
 /**
@@ -139,13 +147,80 @@ let focusX = 0;
 let peakDistance = 0;
 const scratch = new Map<string, number>();
 
+/**
+ * The replay has two sources and the mode picks between them.
+ *
+ * **Manual gaits play live**, because dragging a slider and watching the stride change on
+ * the next step is the entire feedback loop the sliders exist for; restarting a recorded
+ * trial on every input event would destroy it.
+ *
+ * **Champions play from a recording**, because a champion changes rarely and a recording is
+ * the only thing you can scrub. Both paths hand the renderers a `Snapshot`, so neither the
+ * 2D nor the 3D view knows which one it is drawing.
+ */
+let recording: Recording | null = null;
+let playFrame = 0;
+let playing = true;
+
+const scrubber = createScrubber(el('scrub'), {
+  onSeek: (frame) => {
+    playFrame = frame;
+  },
+  onPlayToggle: (next) => {
+    playing = next;
+  },
+});
+
 /** The replay is for looking at. It never contributes to fitness. */
 function respawn(): void {
   sim?.dispose();
-  sim = new Sim(morph, { tilt: new Rng(state.seed).range(-0.02, 0.02) });
+  sim = null;
+  recording = null;
   accumulator = 0;
   focusX = 0;
   peakDistance = 0;
+  playFrame = 0;
+
+  if (state.mode === 'manual') {
+    sim = new Sim(morph, { tilt: new Rng(state.seed).range(-0.02, 0.02) });
+  } else {
+    // Twice the trial length, matching what the live replay used to loop at — a champion
+    // scored over four seconds is more interesting for the four after it, where a gait that
+    // was merely surviving tends to stop.
+    const taped = evaluateGait(morph, activeGait(state), {
+      seed: state.seed,
+      seconds: state.trialSeconds * 2,
+      record: true,
+    });
+    recording = taped.recording;
+    scrubber.attach(recording.frames, recording.hz);
+  }
+  el('scrub').classList.toggle('on', recording !== null);
+}
+
+/** The snapshot both renderers draw this frame, or null if there is nothing to draw yet. */
+function replayFrame(dt: number, gait: GaitParams): Snapshot | null {
+  if (recording) {
+    if (playing) {
+      playFrame += dt * recording.hz;
+      if (playFrame > recording.frames - 1) playFrame = 0;
+    }
+    scrubber.show(Math.round(playFrame), playing);
+    return snapshotAt(recording, playFrame);
+  }
+
+  if (!sim) return null;
+  accumulator += dt;
+  let budget = 0;
+  while (accumulator >= TIMESTEP && budget < 600) {
+    stepControlled(sim, morph, gait, 1, scratch);
+    accumulator -= TIMESTEP;
+    budget++;
+  }
+  const snap = sim.snapshot();
+  // Loop the replay a moment after it settles, so the stage always has motion on it.
+  if (snap.time > state.trialSeconds * 2 || (snap.fallen && snap.time > 2.5)) respawn();
+  return snap;
 }
 
 const panel = createSliders(el('sliders'), state.manualGait, (next) => {
@@ -216,6 +291,8 @@ el('btn-reset').addEventListener('click', () => {
   startPool();
   setMode('manual');
 });
+el('view-2d').addEventListener('click', () => setView('2d'));
+el('view-3d').addEventListener('click', () => setView('3d'));
 el('mode-manual').addEventListener('click', () => setMode('manual'));
 el('mode-evolved').addEventListener('click', () => setMode('evolved'));
 el('btn-adopt').addEventListener('click', () => {
@@ -293,6 +370,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); setRunning(!state.running); }
   if (e.key === 'r' || e.key === 'R') el('btn-reset').click();
   if (e.key === 'm' || e.key === 'M') setMode(state.mode === 'manual' ? 'evolved' : 'manual');
+  if (e.key === '2') setView('2d');
+  if (e.key === '3') setView('3d');
   if (e.key === 's' || e.key === 'S') stepper.open();
 });
 
@@ -306,10 +385,62 @@ function queueUrl(): void {
     q.set('gait', encodeGait(state.manualGait));
     if (state.mode === 'evolved') q.set('mode', 'evolved');
     q.set('stage', state.stage);
+    if (state.view === '3d') q.set('view', '3d');
     q.set('goal', state.preset.key);
     if (encodeSpec(spec) !== encodeSpec(DEFAULT_SPEC)) q.set('body', encodeSpec(spec));
     history.replaceState(null, '', `?${q.toString()}`);
   }, 250);
+}
+
+/* ---------------- the 3D view ---------------- */
+
+/**
+ * Three.js arrives here and nowhere else, behind a dynamic `import()`.
+ *
+ * It is about 600 kB and the guided flow never opens this view, so it must not be in the
+ * first paint. Vite splits it into its own chunk purely because this is the only reference
+ * to it and the reference is asynchronous.
+ *
+ * The 3D view **does not get its own clock**. It renders whatever snapshot the replay
+ * produced this frame — the same one the 2D canvas would have drawn. Invariant 1 does not
+ * bend because something has an orbit camera now.
+ */
+let threeView: ThreeView | null = null;
+let orbitHandle: OrbitHandle | null = null;
+let threeLoading = false;
+
+async function ensureThree(): Promise<void> {
+  if (threeView || threeLoading) return;
+  threeLoading = true;
+  try {
+    // Only `scene.ts` is dynamic — it is the one that pulls in Three. `controls.ts` imports
+    // nothing from Three but a type, so it is loaded statically with the scrubber; importing
+    // it both ways would have kept it out of its own chunk and bought nothing.
+    const { createThreeView } = await import('./render/three/scene.ts');
+    threeView = createThreeView(stage3d);
+    orbitHandle = attachOrbit(stage3d, threeView.orbit, () => {
+      /* The next frame picks the new camera up; nothing to do here. */
+    });
+    // Double-click to get back to the default three-quarter view. Easy to lose the robot
+    // entirely by dragging past the poles, and hunting for it is not a puzzle worth setting.
+    stage3d.addEventListener('dblclick', () => threeView?.resetCamera());
+    const rect = stage3d.getBoundingClientRect();
+    threeView.resize(rect.width, rect.height);
+  } catch (err) {
+    console.error('the 3D view failed to load:', err);
+    setView('2d');
+  } finally {
+    threeLoading = false;
+  }
+}
+
+function setView(next: '2d' | '3d'): void {
+  state.view = next;
+  document.body.dataset['view'] = next;
+  el('view-2d').classList.toggle('on', next === '2d');
+  el('view-3d').classList.toggle('on', next === '3d');
+  if (next === '3d') void ensureThree();
+  queueUrl();
 }
 
 /* ---------------- frame ---------------- */
@@ -327,6 +458,9 @@ function resize(): void {
   fit(chart, cctx, dpr);
   fit(archiveCanvas, actx, dpr);
   archivePainted = -1;
+  // Three owns its own drawing buffer, so it resizes itself rather than going through fit().
+  const r3 = stage3d.getBoundingClientRect();
+  threeView?.resize(r3.width, r3.height);
 }
 
 function frame(now: number): void {
@@ -350,26 +484,23 @@ function frame(now: number): void {
   lastFrame = now;
   const gait: GaitParams = activeGait(state);
 
-  if (sim) {
-    accumulator += dt;
-    let budget = 0;
-    while (accumulator >= TIMESTEP && budget < 600) {
-      stepControlled(sim, morph, gait, 1, scratch);
-      accumulator -= TIMESTEP;
-      budget++;
-    }
-    const snap = sim.snapshot();
+  const snap = replayFrame(dt, gait);
+  if (snap) {
     peakDistance = Math.max(peakDistance, snap.distance);
-
-    // Loop the replay a moment after it settles, so the stage always has motion on it.
-    if (snap.time > state.trialSeconds * 2 || (snap.fallen && snap.time > 2.5)) respawn();
 
     const torsoX = snap.bodies.find((b) => b.id === 'torso')?.x ?? 0;
     if (torsoX - focusX > 0.7) focusX = torsoX - 0.7;
     else if (torsoX - focusX < -0.7) focusX = torsoX + 0.7;
 
-    const rect = stage.getBoundingClientRect();
-    draw(sctx, snap, rect.width, rect.height, focusX);
+    // One snapshot, whichever renderer is on. Drawing the hidden one as well would double
+    // the cost for nothing, and letting them fall out of step is the bug the shared
+    // `Snapshot` exists to prevent.
+    if (state.view === '3d' && threeView) {
+      threeView.render(snap);
+    } else {
+      const rect = stage.getBoundingClientRect();
+      draw(sctx, snap, rect.width, rect.height, focusX);
+    }
 
     hud.time.textContent = `${snap.time.toFixed(2)} s`;
     hud.distance.textContent = `${snap.distance.toFixed(2)} m  (peak ${peakDistance.toFixed(2)})`;
@@ -560,6 +691,7 @@ async function boot(): Promise<void> {
   respawn();
   el('s-workers').textContent = String(state.workers);
   setStage(state.stage);
+  setView(state.view);
   startPool();
   setMode('manual');
   queueUrl();

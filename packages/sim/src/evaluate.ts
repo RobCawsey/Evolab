@@ -1,9 +1,12 @@
 /**
- * Run one genome for one trial and return numbers. No rendering, no recording, no search.
+ * Run one genome for one trial and return numbers. No rendering, no search.
  *
  * This is the inner loop of the whole project: from slice 2 onward it runs tens of
  * thousands of times per study, so the two things that matter are that it disposes its
  * world and that it stops early when the robot is already on the floor.
+ *
+ * From slice 9 it can also record the trajectory, but only when asked. `record` unset is the
+ * path the search takes and it allocates nothing beyond what it always did.
  */
 
 import {
@@ -16,6 +19,7 @@ import {
   type TrialResult,
 } from '@evolab/evolution';
 import { CONTROL_EVERY } from './control.ts';
+import { RECORD_HZ, createRecorder, type Recorder, type Recording } from './record.ts';
 import { Sim, TIMESTEP } from './world.ts';
 
 export interface TrialOptions {
@@ -24,7 +28,19 @@ export interface TrialOptions {
   readonly seconds: number;
   /** Peak initial lean, radians. Zero makes trials noiseless but flatters fragile gaits. */
   readonly tiltRange?: number;
+  /**
+   * Capture the trajectory as well as the score.
+   *
+   * **Off by default and it must stay that way.** The search runs this function tens of
+   * thousands of times per study; recording is for the one genome someone is looking at.
+   * With it unset nothing extra is allocated — no recorder, no buffers, not even the
+   * contact booleans being written anywhere.
+   */
+  readonly record?: boolean;
 }
+
+/** A trial that was asked to remember what it did. */
+export type RecordedTrial = TrialResult & { readonly recording: Recording };
 
 const DEFAULT_TILT_RANGE = 0.02;
 
@@ -71,12 +87,29 @@ function meanStride(touchdowns: readonly number[]): number {
   return (last - first) / (touchdowns.length - 1);
 }
 
+/**
+ * How many physics steps between recorded samples. Four, giving 60 Hz from a 240 Hz sim —
+ * the same cadence the controller runs at, so a recorded frame always lands on a tick where
+ * the joint targets had just been set rather than midway through the motors chasing them.
+ */
+const RECORD_EVERY = Math.round(1 / TIMESTEP / RECORD_HZ);
+
 /** Run a trial from already-decoded controller parameters. */
 export function evaluateGait(
   morph: Morphology,
   params: GaitParams,
+  opts: TrialOptions & { readonly record: true },
+): RecordedTrial;
+export function evaluateGait(
+  morph: Morphology,
+  params: GaitParams,
   opts: TrialOptions,
-): TrialResult {
+): TrialResult;
+export function evaluateGait(
+  morph: Morphology,
+  params: GaitParams,
+  opts: TrialOptions,
+): TrialResult | RecordedTrial {
   const steps = Math.round(opts.seconds / TIMESTEP);
   const tiltRange = opts.tiltRange ?? DEFAULT_TILT_RANGE;
   const sim = new Sim(morph, { tilt: new Rng(opts.seed).range(-tiltRange, tiltRange) });
@@ -94,6 +127,7 @@ export function evaluateGait(
     ['footR', newTrack()],
   ]);
   let frames = 0;
+  let recorder: Recorder | null = null;
 
   try {
     for (let i = 0; i <= steps; i++) {
@@ -113,6 +147,14 @@ export function evaluateGait(
         if (down && !track.down && i > 0) track.touchdowns.push(snap.distance);
         if (down) track.stanceFrames++;
         track.down = down;
+      }
+
+      // Recorded before the fall check, for the same reason: the frame it goes down on is
+      // the one worth watching. The recorder is built from the first snapshot because that
+      // is where the body and joint ids come from.
+      if (opts.record && i % RECORD_EVERY === 0) {
+        recorder ??= createRecorder(snap, Math.floor(steps / RECORD_EVERY) + 1);
+        recorder.push(snap, tracks.get('footL')!.down, tracks.get('footR')!.down);
       }
 
       if (snap.fallen) {
@@ -147,7 +189,10 @@ export function evaluateGait(
     const stance = [...tracks.values()].reduce((a, t) => a + t.stanceFrames, 0);
     const dutyFactor = frames > 0 ? stance / (frames * tracks.size) : 0;
 
-    return { distance, uprightTime, effort, fell, duration, strideLength, dutyFactor };
+    const result: TrialResult = {
+      distance, uprightTime, effort, fell, duration, strideLength, dutyFactor,
+    };
+    return recorder === null ? result : { ...result, recording: recorder.finish(fell) };
   } finally {
     // Rapier allocates in WASM memory and is not garbage collected. Leaking worlds here is
     // the single most likely cause of a run that gets mysteriously slower and then dies.
@@ -156,7 +201,21 @@ export function evaluateGait(
 }
 
 /** Run a trial from a genome. The form the genetic algorithm uses. */
-export function evaluate(morph: Morphology, genome: Genome, opts: TrialOptions): TrialResult {
+export function evaluate(
+  morph: Morphology,
+  genome: Genome,
+  opts: TrialOptions & { readonly record: true },
+): RecordedTrial;
+export function evaluate(
+  morph: Morphology,
+  genome: Genome,
+  opts: TrialOptions,
+): TrialResult;
+export function evaluate(
+  morph: Morphology,
+  genome: Genome,
+  opts: TrialOptions,
+): TrialResult | RecordedTrial {
   return evaluateGait(morph, decodeGenome(genome), opts);
 }
 

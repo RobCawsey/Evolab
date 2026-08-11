@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 8</title>
+    <title>Evolab — slice 9</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -94,6 +94,34 @@
       /* stage */
       .stage-wrap { position: relative; min-width: 0; }
       #stage { display: block; width: 100%; height: 100%; }
+      /*
+        The two renderers occupy the same box and exactly one is shown. They draw the same
+        Snapshot, so switching never reloads or reseeks anything — it is a visibility toggle
+        and nothing more.
+      */
+      #stage3d {
+        display: none; position: absolute; inset: 0; width: 100%; height: 100%;
+        cursor: grab; touch-action: none;
+      }
+      #stage3d:active { cursor: grabbing; }
+      body[data-view="3d"] #stage { visibility: hidden; }
+      body[data-view="3d"] #stage3d { display: block; }
+      .scrub {
+        position: absolute; left: 12px; right: 12px; bottom: 12px;
+        display: none; align-items: center; gap: 10px;
+        background: rgba(14, 13, 21, .86); border: 1px solid var(--line);
+        border-radius: 3px; padding: 7px 11px;
+      }
+      .scrub.on { display: flex; }
+      .sc-play {
+        font-size: 10px; line-height: 1; min-width: 26px; padding: 5px 6px;
+      }
+      .sc-range { flex: 1; margin: 0; }
+      .sc-time {
+        font-family: var(--mono); font-size: 11px; font-weight: 400;
+        color: var(--text); font-variant-numeric: tabular-nums; min-width: 48px;
+        text-align: right;
+      }
       #hud {
         position: absolute; top: 12px; left: 12px;
         display: flex; flex-direction: column; gap: 4px;
@@ -271,9 +299,13 @@
         <button id="mode-evolved">Evolved</button>
       </span>
       <button id="btn-adopt" class="explorer-only" disabled>Copy champion to sliders</button>
+      <span class="seg">
+        <button id="view-2d" class="on" title="The teaching view (2)">2D</button>
+        <button id="view-3d" title="Orbit around the robot (3)">3D</button>
+      </span>
       <button id="btn-stepper">Show me how this works →</button>
       <span class="spacer"></span>
-      <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode &nbsp;·&nbsp; S — stepper</span>
+      <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode &nbsp;·&nbsp; 2/3 — view &nbsp;·&nbsp; S — stepper</span>
     </header>
 
     <main>
@@ -285,6 +317,8 @@
 
       <div class="stage-wrap">
         <canvas id="stage"></canvas>
+        <canvas id="stage3d"></canvas>
+        <div class="scrub" id="scrub"></div>
         <div id="hud">
           <div><span>replay</span><b id="v-time">—</b></div>
           <div><span>distance</span><b id="v-distance">—</b></div>
