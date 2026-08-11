@@ -35,6 +35,7 @@ import type { OrbitHandle } from './render/three/controls.ts';
 import type { ThreeView } from './render/three/scene.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
+import { createToolbar } from './ui/toolbar.ts';
 import { createGuided } from './ui/guided.ts';
 import { createEditor, decodeSpec, encodeSpec } from './ui/editor.ts';
 import { presetByKey, type Preset } from './run/objectives.ts';
@@ -149,6 +150,32 @@ function startPool(): void {
     onError: (id, message) => console.error(`island ${id}:`, message),
   });
 }
+
+/* ---------------- toolbar ---------------- */
+
+/**
+ * **Listed in the order they appear on screen**, because that is the order they are put back
+ * in when the bar is repacked — listing them by priority instead silently rearranged the
+ * whole toolbar on the first resize.
+ *
+ * `priority` is the separate question of what is given up first, lowest going first: the two
+ * long-labelled buttons before anything with a short label, and Run last, because a toolbar
+ * without it is not a toolbar.
+ */
+const toolbar = createToolbar(
+  document.querySelector('header')!,
+  document.querySelector('header .spacer')!,
+  [
+    { id: 'stages', priority: 7 },
+    { id: 'btn-run', priority: 8 },
+    { id: 'btn-reset', priority: 3 },
+    { id: 'modes', priority: 4 },
+    { id: 'btn-adopt', priority: 1 },
+    { id: 'views', priority: 5 },
+    { id: 'btn-challenges', priority: 6 },
+    { id: 'btn-stepper', priority: 2 },
+  ],
+);
 
 /* ---------------- replay ---------------- */
 
@@ -292,6 +319,9 @@ function setStage(next: AppStage): void {
   }
   el('guided').hidden = next !== 'guided' || !track.hidden;
 
+  // Stage changes show and hide `.explorer-only` controls without changing the header's
+  // own size, so no ResizeObserver fires and the bar has to be told to repack.
+  toolbar.refresh();
   queueUrl();
 }
 

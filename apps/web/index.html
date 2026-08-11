@@ -40,7 +40,30 @@
         display: flex; align-items: center; gap: 10px;
         padding: 0 12px; height: 42px; flex: none;
         background: var(--panel); border-bottom: 1px solid var(--line);
+        /* Anchors the overflow menu, and stops the row wrapping instead of collapsing. */
+        position: relative; flex-wrap: nowrap;
       }
+      header > * { flex: none; }
+
+      /*
+        Overflow menu. Controls that do not fit are *moved* here, not duplicated — they are
+        all wired by id in main.ts, so a copy would be a dead button that looks live.
+      */
+      .tb-more { font-size: 14px; line-height: 1; padding: 3px 9px; }
+      .tb-menu {
+        position: absolute; top: 41px; right: 10px; z-index: 40;
+        display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+        background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
+        padding: 9px; min-width: 190px; box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+      }
+      .tb-menu .seg { flex-direction: column; }
+      .tb-menu button { text-align: left; }
+
+      /*
+        The keyboard hint is help text rather than a control, so it is hidden outright when
+        space is short instead of taking a slot in the menu.
+      */
+      @media (max-width: 1180px) { .hint { display: none; } }
       .brand { font-weight: 600; letter-spacing: .1em; text-transform: uppercase; font-size: 12px; }
       .brand em { font-style: normal; color: var(--amber); }
       .spacer { flex: 1; }
@@ -369,12 +392,12 @@
       </span>
       <button id="btn-run" class="pri explorer-only">Run</button>
       <button id="btn-reset" class="explorer-only">Reset</button>
-      <span class="seg explorer-only">
+      <span class="seg explorer-only" id="modes">
         <button id="mode-manual" class="on">Manual</button>
         <button id="mode-evolved">Evolved</button>
       </span>
       <button id="btn-adopt" class="explorer-only" disabled>Copy champion to sliders</button>
-      <span class="seg">
+      <span class="seg" id="views">
         <button id="view-2d" class="on" title="The teaching view (2)">2D</button>
         <button id="view-3d" title="Orbit around the robot (3)">3D</button>
       </span>
