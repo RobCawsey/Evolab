@@ -79,7 +79,20 @@ export type Afterword =
 export type Focus = 'stepper' | 'archive' | 'gait' | '3d' | 'chart';
 
 export interface ChallengeSetup {
-  readonly stage?: 'guided' | 'explorer' | 'lab';
+  /**
+   * **Deliberately not `'guided'`.**
+   *
+   * The guided stage hides everything marked `.explorer-only`, which is Run, Reset, the mode
+   * toggle, the behaviour map and the gait strip. A card that selected it left the learner
+   * reading "Run 30 generations" with no Run button on screen — and with the track open the
+   * guided flow's own start button is hidden too, so there was no way to start anything at
+   * all. The track is the Explorer-level curriculum; the guided flow is a different first-run
+   * path that does not need it.
+   *
+   * Excluded from the type rather than caught by a test, because a card that cannot ask for
+   * it cannot regress.
+   */
+  readonly stage?: 'explorer' | 'lab';
   /** Preset key from `run/objectives.ts`. */
   readonly goal?: string;
   readonly gens?: number;

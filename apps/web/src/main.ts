@@ -280,6 +280,18 @@ function setStage(next: AppStage): void {
   for (const s of ['guided', 'explorer', 'lab'] as const) {
     el(`stage-${s}`).classList.toggle('on', s === next);
   }
+
+  // The challenge track cannot function in the guided stage — Run, Reset, the behaviour map
+  // and the gait strip are all hidden there — so going to Guided closes it and gives the
+  // guided flow its column back. That is not a lock: reopening the track puts you back in
+  // Explorer, which is the stage it needs.
+  const track = el('challenges');
+  if (next === 'guided' && !track.hidden) {
+    track.hidden = true;
+    el('btn-challenges').classList.remove('on');
+  }
+  el('guided').hidden = next !== 'guided' || !track.hidden;
+
   queueUrl();
 }
 
@@ -608,8 +620,13 @@ function openChallenge(challenge: Challenge): void {
   setMode('manual');
 
   // The focus is a hint about where to look, not a mode. Everything stays reachable.
+  //
+  // Closing the stepper is not optional: it is a full-screen overlay, so a card opened after
+  // one of the stepper cards would otherwise leave it covering the stage — and the Run button
+  // the new card asks for is underneath it.
+  if (setup.focus === 'stepper') stepper.open();
+  else if (stepper.isOpen) stepper.close();
   if (setup.focus === '3d') setView('3d');
-  else if (setup.focus === 'stepper') stepper.open();
 
   paintTrack();
   queueUrl();
@@ -637,7 +654,15 @@ el('btn-challenges').addEventListener('click', () => {
   el('btn-challenges').classList.toggle('on', !panel.hidden);
   // The guided flow and the track both want the left column; showing both is a mess.
   el('guided').hidden = !panel.hidden ? true : state.stage !== 'guided';
-  if (!panel.hidden) paintTrack();
+
+  if (!panel.hidden) {
+    // The track needs the Explorer toolbar to be usable at all — Run, Reset, the behaviour
+    // map and the gait strip are all `.explorer-only`. Opening it from the guided stage
+    // otherwise produces a panel full of tasks and nothing to press. Cards cannot ask for
+    // the guided stage (see ChallengeSetup.stage); this is the same wall reached by hand.
+    if (state.stage === 'guided') setStage('explorer');
+    paintTrack();
+  }
 });
 
 /* ---------------- frame ---------------- */

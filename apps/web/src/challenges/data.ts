@@ -26,7 +26,10 @@ export const CHALLENGES: readonly Challenge[] = [
       'Generation zero is random. Nobody chose any of these gaits, and most of them will not ' +
       'survive the first second.',
     task: 'Run 30 generations and watch the fitness line climb out of the floor.',
-    setup: { stage: 'guided', goal: 'far', gens: 30, focus: 'chart' },
+    // Explorer, not guided — see the note on ChallengeSetup.stage. The guided stage hides
+    // Run, Reset, the archive and the gait strip, so a card asking for it leaves the learner
+    // with a task and nothing to press.
+    setup: { stage: 'explorer', goal: 'far', gens: 30, focus: 'chart' },
     success: { metric: 'generations', op: '>=', value: 30 },
     afterword: {
       when: { metric: 'championDistance', op: '>', value: 3 },
