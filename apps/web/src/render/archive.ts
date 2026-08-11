@@ -1,5 +1,5 @@
 /**
- * The behaviour map — Fig 11.1. One `ImageData` blit, not 576 DOM nodes.
+ * The behaviour map — Fig 9.5, note 2. One `ImageData` blit, not 576 DOM nodes.
  *
  * It repaints on every generation, and at four workers that is several times a second. A
  * grid of divs at that rate spends more time in style recalculation than the search spends

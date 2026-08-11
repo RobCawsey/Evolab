@@ -1727,8 +1727,13 @@ will simply fall sideways, and evolution cannot fix it because nothing in the ge
 in that axis.
 
 The cost is visible and is not hidden: orbit round to the front and the legs are perfectly
-aligned laterally, because they can never be anything else. That belongs in §9 of the design
-document as an amendment, the way slice 7 amended §12 about React.
+aligned laterally, because they can never be anything else.
+
+This is now **written into the design document**, as `.amend` blocks in §2 (which named
+`rapier3d` in its decision), §4 (which specified the engine and budgeted for a full-3D mode)
+and §9 (whose mockups all show a 3D robot). The two full-3D rows in §4's throughput table are
+tagged *hypothetical* rather than deleted, because the derivation is still the honest basis for
+the 2D-versus-3D comparison the surrounding prose draws.
 
 Revisit only if the genome grows a lateral term.
 

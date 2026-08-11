@@ -26,8 +26,9 @@ dragging a slider and seeing the next step change is the whole reason the slider
 **The physics is still 2D and the view does not hide it.** Orbit to the front and the legs are
 perfectly aligned laterally, because nothing in the eleven-gene genome moves in that axis.
 Moving to `rapier3d` would invalidate every fitness number in the project to buy a sideways
-fall evolution has no lever to correct. Decided, reasoned in the slice 9 notes, and it belongs
-in §9 of the design document as an amendment.
+fall evolution has no lever to correct. **Written into the design document** as amendments to
+§2, §4 and §9 — `rapier3d-compat` is not a dependency and the full-3D throughput rows are
+marked hypothetical.
 
 **`bodies.ts` imports nothing from Three and that is load-bearing.** Every decision about how a
 sagittal simulation becomes a 3D scene — leg separation in z, box depth, camera focus — is

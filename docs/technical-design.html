@@ -123,6 +123,17 @@ h4{font-size:15.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--in
   border-radius:0 3px 3px 0;font-size:15.5px}
 .pick strong{font-family:var(--display);letter-spacing:.02em}
 
+/* An amendment is a decision that changed after contact with the build. Deliberately not
+   styled like .pick: the original text stays put and this sits next to it, so the reasoning
+   that was superseded is still readable rather than quietly rewritten. */
+.amend{border:1px solid var(--rule);border-left:2px solid var(--violet);background:var(--surface);
+  padding:13px 16px;border-radius:0 3px 3px 0;font-size:15.5px}
+.amend > .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--violet);display:block;margin-bottom:7px}
+.amend p{margin:0 0 10px}
+.amend p:last-child{margin-bottom:0}
+.amend strong{font-family:var(--display);letter-spacing:.02em;color:var(--ink)}
+
 .tbl{width:100%;overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
 table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
 th{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
@@ -403,6 +414,17 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     timestep mean a run replays identically in the same browser, so a bug reproduces and a golden
     test is possible. What is given up is bit-identity <em>across</em> runtimes — a property that
     only had a customer in the feature just cut.</p>
+
+    <div class="amend"><span class="lbl">Amended — slice 9</span>
+    <p>Only <span class="mono">rapier2d-compat</span> was ever installed. <strong>The simulation is
+    2D sagittal permanently and <span class="mono">rapier3d</span> is not a dependency</strong> —
+    the reasoning is in §4, where the engine decision lives.</p>
+    <p>One line above needs qualifying rather than correcting. Determinism holds for a single
+    island: same seed, same replay, and the golden test rests on it. It does <em>not</em> hold
+    across worker counts, because migration between islands is asynchronous and a migrant landing
+    before generation 7 rather than after changes everything downstream. Every guarantee the
+    project makes is stated over the single-island case, which is what the CLI and the golden test
+    run.</p></div>
   </div>
 
   <figure style="margin-top:26px">
@@ -607,6 +629,33 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     <span class="mono">-compat</span> builds inline the WASM as base64, which sidesteps an entire
     category of bundler and worker-loading problems — worth the slightly larger download on the
     first slice, and revisitable later.</div>
+
+    <div class="amend"><span class="lbl">Amended — slice 9</span>
+    <p><strong>The full 3D physics mode is not being built, and <span class="mono">rapier3d-compat</span>
+    is not a dependency.</strong> The simulation is 2D sagittal, permanently. The 3D view added in
+    slice 9 renders that same 2D simulation — segments extruded into boxes, legs genuinely separated
+    in <span class="mono">z</span> instead of nudged apart — and simulates nothing in the third
+    axis. Everything above about Rapier, the fixed timestep and the testability discipline stands
+    unchanged; only the second engine goes.</p>
+    <p>The argument is not cost. It is that the controller has eleven genes and <em>not one of them
+    acts in the lateral axis</em>. A biped free to fall sideways will fall sideways, and evolution
+    cannot correct it, because there is nothing in the genome for selection to act on. Moving to
+    <span class="mono">rapier3d</span> would invalidate every fitness number in the project and
+    force the golden test to be re-pinned, in order to buy a failure mode the search has no lever
+    against. That is a strictly worse robot, arrived at expensively — the kind of trade that looks
+    like rigour and is not.</p>
+    <p>The cost is real and is <strong>stated in the interface rather than hidden</strong>: orbit
+    the camera round to the front and the legs are perfectly aligned, because they can never be
+    anything else. <em>Why is it flat?</em> is the first question any reader will ask, and an
+    unanswered one teaches them the project is sloppy instead of deliberate.</p>
+    <p>Two consequences for the numbers below. The two full-3D rows in the throughput budget are
+    now hypothetical and are marked as such — they are kept because the derivation is still the
+    honest basis for the comparison the surrounding prose draws. And the trajectory rows turn out
+    to have been close: slice 9 records 60 Hz poses, joint angles and foot contacts at about 40 KB
+    for a four-second trial against the 36 KB predicted here, without the quantisation.</p>
+    <p>Revisit if and only if the genome grows a lateral term — §14 territory at the earliest, and
+    a great deal of controller work before the physics question even arises. Until then this is a
+    decision, not a deferral.</p></div>
   </div>
 
   <h3 class="col" style="margin-top:32px">Keeping the simulation testable</h3>
@@ -642,8 +691,10 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
       <tr><td>Trial, 2D guided</td><td class="num">~11 ms</td><td>7-body sagittal, 4 s, 960 steps × ~12 µs</td></tr>
       <tr><td>Generation, guided</td><td class="num">~40 ms</td><td>24 individuals × 1 seed ÷ 7 workers</td></tr>
       <tr><td>Guided run, 30 gens</td><td class="num">~1.4 s</td><td>The whole search, watchable end to end — §7</td></tr>
-      <tr><td>Generation, full 3D</td><td class="num">~1.9 s</td><td>128 individuals × 2 seeds ÷ 8 browser workers</td></tr>
-      <tr><td>200 generations, 3D</td><td class="num">~5 min</td><td>The long case; run it while doing something else</td></tr>
+      <tr><td>Generation, full 3D</td><td class="num">~1.9 s</td><td>128 individuals × 2 seeds ÷ 8 browser workers
+        &nbsp;<span class="tag t-am">hypothetical</span></td></tr>
+      <tr><td>200 generations, 3D</td><td class="num">~5 min</td><td>The long case; run it while doing something else
+        &nbsp;<span class="tag t-am">hypothetical</span></td></tr>
       <tr><td>Trajectory, raw</td><td class="num">36 KB</td><td>480 frames × 19 floats × 4 B</td></tr>
       <tr><td>Trajectory, stored</td><td class="num">~9 KB</td><td>16-bit quantised + delta + gzip</td></tr>
       <tr><td>Full run archive</td><td class="num">~4 MB</td><td>Champion + archive elites only, 200 gens</td></tr>
@@ -892,7 +943,10 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
   <div class="grid g3" style="margin-top:14px">
     <div class="card"><span class="k">3D stage</span><h4>Three.js / R3F</h4>
       <p>Instanced meshes for ghost replays, a single draw call per robot. LOD drops to capsule
-      proxies beyond 12 m. Frame-rate capped at display refresh, paused when the tab is hidden.</p></div>
+      proxies beyond 12 m. Frame-rate capped at display refresh, paused when the tab is hidden.</p>
+      <p style="color:var(--violet);font-size:13.5px"><strong>Amended, slice 9:</strong> Three.js
+      directly, no react-three-fiber — there is no React (§12). Instancing survives and is the one
+      part of this card that was load-bearing. No LOD: one robot at 3 m does not need it.</p></div>
     <div class="card"><span class="k">2D analysis</span><h4>Canvas 2D + uPlot</h4>
       <p>Gait diagrams, phase portraits and joint traces. uPlot handles the streaming fitness chart
       at 60 Hz with tens of thousands of points where SVG would collapse.</p></div>
@@ -1003,6 +1057,21 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
       does not pause evolution.</div>
     </div>
   </figure>
+
+  <div class="amend" style="margin-top:26px"><span class="lbl">Amended — slice 9</span>
+  <p><strong>Every 3D robot in these mockups is a 3D <em>rendering</em> of a 2D simulation.</strong>
+  The physics is sagittal and stays that way; §4 records why, and the short version is that the
+  eleven-gene controller has no lateral term, so a biped allowed to fall sideways would fall
+  sideways with nothing in the genome for evolution to act on. Orbit to the front in the built app
+  and the legs are perfectly aligned, because they can never be anything else.</p>
+  <p>Two details of these frames were not built as drawn. The 3D view is a <strong>toggle in the
+  toolbar, not the always-on inset</strong> of Fig 9.3 note 4 — an inset large enough to read costs
+  more stage than it earns, and one large view the user chooses is clearer than two small ones they
+  did not. And the replay it shows is a <em>recorded</em> trial for champions, which is what makes
+  the scrubber possible; manual gaits still play live, because dragging a slider and seeing the next
+  step change is the whole reason the sliders exist.</p>
+  <p>Ghost overlays and the gait-analysis panels of Fig 9.7 are not built yet. They are slice 10,
+  and they read the same recording rather than re-running anything.</p></div>
 
   <figure style="margin-top:44px">
     <div class="mock"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
@@ -1163,9 +1232,18 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
       <tr><td>Language</td><td>TypeScript, strict</td><td>Genome and morphology schemas are the app's
         contract across four thread boundaries; they need to be checked.</td></tr>
       <tr><td>Framework</td><td>React 19 + Vite</td><td>Ecosystem depth for R3F and the panel system.
-        The heavy work is off-thread, so framework overhead is not the bottleneck.</td></tr>
+        The heavy work is off-thread, so framework overhead is not the bottleneck.
+        <br><span style="color:var(--violet)"><strong>Amended, slice 7:</strong> Vite, no React. The
+        panels are plain DOM built by functions that take state and return an update method. React
+        was carried as a deferral through six slices and never became the cheaper option — the body
+        editor was the trigger condition, and it landed in about 200 lines without one. Recorded
+        here because the 3D row above depends on it: no React means no react-three-fiber.</span></td></tr>
       <tr><td>3D</td><td>Three.js via react-three-fiber</td><td>Declarative scene graph keeps the
-        replay in sync with app state without an imperative bridge to maintain.</td></tr>
+        replay in sync with app state without an imperative bridge to maintain.
+        <br><span style="color:var(--violet)"><strong>Amended, slice 9:</strong> Three.js directly.
+        R3F needs React, which this project does not have. The bridge it would have saved turned out
+        to be one function — the renderer takes a <span class="mono">Snapshot</span> and holds no
+        app state, so there is nothing to keep in sync.</span></td></tr>
       <tr><td>Evolution</td><td>Plain TypeScript, no framework</td><td>Pure functions in one
         package. Was a Rust/WASM kernel until v2.0 — §2 records why that reversed.</td></tr>
       <tr><td>Physics</td><td><span class="mono">@dimforge/rapier2d-compat</span></td><td>The same

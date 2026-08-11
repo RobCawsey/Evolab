@@ -1,5 +1,5 @@
 /**
- * The 3D replay — §9 of the design document, Fig 9.1.
+ * The 3D replay — Fig 9.5 of the design document; the physics decision behind it is in §4.
  *
  * **This is the only file in the project that imports Three.js**, and it is only ever
  * reached through a dynamic `import()` from `main.ts`. Three is about 600 kB and the guided

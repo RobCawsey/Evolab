@@ -1,5 +1,5 @@
 /**
- * A MAP-Elites behaviour archive — §11 of the design document, Fig 11.1.
+ * A MAP-Elites behaviour archive — specified in §3 of the design document, drawn in Fig 9.5.
  *
  * The genetic algorithm answers one question: what is the best gait? The archive answers a
  * different and, for a teaching tool, better one: *what kinds of gait are there, and how
