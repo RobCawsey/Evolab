@@ -28,6 +28,49 @@ export interface TrialOptions {
 
 const DEFAULT_TILT_RANGE = 0.02;
 
+/**
+ * How close the lowest corner of a foot must come to the ground to count as standing on it.
+ *
+ * Five millimetres, chosen by measurement rather than by taste. Swept against the reference
+ * champion (seed 4417, 30 generations, 5.96 m), the touchdown count is a flat 7 per foot for
+ * every threshold from 1 mm to 10 mm and collapses to 3 at 20 mm, where separate steps start
+ * merging into one. Duty factor drifts 0.78 → 0.84 across that flat region, so the number is
+ * not threshold-free, but it is stable well either side of the value picked. That gait lifts
+ * its feet 58 mm and 135 mm, an order of magnitude clear of any of it.
+ *
+ * Deliberately not a collision-event subscription. The ground is a plane at y = 0 and stays
+ * one until the challenge track in slice 14, so a geometry test on the snapshot the trial
+ * already takes is cheaper and far easier to reason about than draining an event queue.
+ * Revisit when the floor stops being flat — an oriented box against a slope is still easy,
+ * an oriented box against arbitrary terrain is not.
+ */
+const CONTACT_EPSILON = 0.005;
+
+/** Lowest corner of an oriented box. The feet are boxes; nothing here assumes they are level. */
+function lowestCorner(y: number, angle: number, halfWidth: number, halfHeight: number): number {
+  return y - (Math.abs(halfWidth * Math.sin(angle)) + Math.abs(halfHeight * Math.cos(angle)));
+}
+
+/** Accumulates stance time and touchdown positions for one foot across a trial. */
+interface FootTrack {
+  down: boolean;
+  stanceFrames: number;
+  /** Torso displacement at each touchdown. Consecutive differences are the strides. */
+  readonly touchdowns: number[];
+}
+
+function newTrack(): FootTrack {
+  return { down: false, stanceFrames: 0, touchdowns: [] };
+}
+
+/** Mean gap between consecutive touchdowns, or 0 if the foot never landed twice. */
+function meanStride(touchdowns: readonly number[]): number {
+  if (touchdowns.length < 2) return 0;
+  const first = touchdowns[0]!;
+  const last = touchdowns[touchdowns.length - 1]!;
+  return (last - first) / (touchdowns.length - 1);
+}
+
 /** Run a trial from already-decoded controller parameters. */
 export function evaluateGait(
   morph: Morphology,
@@ -46,11 +89,31 @@ export function evaluateGait(
   let distance = 0;
   let duration = 0;
 
+  const tracks = new Map<string, FootTrack>([
+    ['footL', newTrack()],
+    ['footR', newTrack()],
+  ]);
+  let frames = 0;
+
   try {
     for (let i = 0; i <= steps; i++) {
       const snap = sim.snapshot();
       duration = snap.time;
       distance = snap.distance;
+
+      // Gait descriptors are sampled before the fall check, so the frame the robot lands on
+      // still counts. They describe how it moved for as long as it was moving.
+      frames++;
+      for (const body of snap.bodies) {
+        const track = tracks.get(body.id);
+        if (!track) continue;
+        const down =
+          lowestCorner(body.y, body.angle, body.halfWidth, body.halfHeight) <= CONTACT_EPSILON;
+        // Rising edge only. A foot that stays down is one touchdown, not four hundred.
+        if (down && !track.down && i > 0) track.touchdowns.push(snap.distance);
+        if (down) track.stanceFrames++;
+        track.down = down;
+      }
 
       if (snap.fallen) {
         fell = true;
@@ -75,7 +138,16 @@ export function evaluateGait(
         sim.step();
       }
     }
-    return { distance, uprightTime, effort, fell, duration };
+    // Averaged over the feet that actually completed a cycle. A one-legged hop is a real
+    // gait and its stride is the hopping foot's, not half of it.
+    const strides = [...tracks.values()].map((t) => meanStride(t.touchdowns)).filter((s) => s > 0);
+    const strideLength = strides.length
+      ? strides.reduce((a, b) => a + b, 0) / strides.length
+      : 0;
+    const stance = [...tracks.values()].reduce((a, t) => a + t.stanceFrames, 0);
+    const dutyFactor = frames > 0 ? stance / (frames * tracks.size) : 0;
+
+    return { distance, uprightTime, effort, fell, duration, strideLength, dutyFactor };
   } finally {
     // Rapier allocates in WASM memory and is not garbage collected. Leaking worlds here is
     // the single most likely cause of a run that gets mysteriously slower and then dies.

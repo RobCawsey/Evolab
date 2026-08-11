@@ -10,6 +10,9 @@
  */
 
 import {
+  archiveBest,
+  archiveCoverage,
+  archiveQd,
   createIsland,
   decodeGenome,
   encodeGenome,
@@ -88,6 +91,49 @@ if (last.bestResult && breakdown) {
   console.log(`  upright    ${last.bestResult.uprightTime.toFixed(2)} s of ${SECONDS} s   (term ${breakdown.upright.toFixed(3)})`);
   console.log(`  effort     ${last.bestResult.effort.toFixed(1)} rad       (term ${breakdown.effort.toFixed(3)})`);
   console.log(`  fell       ${last.bestResult.fell ? 'yes' : 'no'}`);
+  console.log(`  stride     ${last.bestResult.strideLength.toFixed(3)} m        (behaviour — not scored)`);
+  console.log(`  duty       ${last.bestResult.dutyFactor.toFixed(3)}          (behaviour — not scored)`);
+}
+
+// The behaviour archive. Coverage is the number to watch: best fitness can sit still for
+// twenty generations while the map is still filling, and a run that ends with one brilliant
+// cell has not explored, whatever its maximum says.
+const archive = island.archive;
+console.log(`\narchive      ${archive.filled} of ${archive.cells.length} cells ` +
+  `(${(archiveCoverage(archive) * 100).toFixed(1)}% coverage), QD score ${archiveQd(archive).toFixed(1)}`);
+console.log(`  offers     ${archive.attempts} trials survived to be filed, ` +
+  `${archive.improvements} claimed or improved a cell ` +
+  `(${((archive.improvements / Math.max(1, archive.attempts)) * 100).toFixed(0)}%)`);
+{
+  // A coarse text rendering: four archive cells per character, so the shape of the map is
+  // visible without a browser. Same data the canvas blits.
+  const cols = archive.stride.bins;
+  const rows = archive.duty.bins;
+  const peak = archiveBest(archive)?.fitness ?? 0;
+  const ramp = ' .:-=+*#%@';
+  for (let row = rows - 1; row >= 0; row -= 2) {
+    let line = '';
+    for (let col = 0; col < cols; col += 2) {
+      // Brightest of the 2 × 2 block, so a lone good cell is never averaged away.
+      let f = -1;
+      for (let dr = 0; dr < 2; dr++) {
+        for (let dc = 0; dc < 2; dc++) {
+          const cell = archive.cells[(row - dr) * cols + col + dc];
+          if (cell) f = Math.max(f, cell.fitness);
+        }
+      }
+      line += f < 0 ? ' ' : ramp[Math.min(ramp.length - 1, Math.round((f / peak) * (ramp.length - 1)))];
+    }
+    const label = row === rows - 1 ? `duty ${archive.duty.max.toFixed(2)}`
+      : row <= 1 ? `     ${archive.duty.min.toFixed(2)}` : '';
+    console.log(`  ${label.padStart(9)} |${line}|`);
+  }
+  const width = cols / 2;
+  const label = 'stride, m';
+  console.log(`            +${'-'.repeat(width)}+`);
+  console.log(`            ${archive.stride.min.toFixed(1).padEnd(width - 2)}` +
+    `${archive.stride.max.toFixed(1)}`);
+  console.log(`            ${' '.repeat(Math.max(0, ((width - label.length) / 2) | 0))}${label}`);
 }
 // Generalisation check. The search sees exactly one starting perturbation, so a champion
 // is tuned to it and will be more fragile than its fitness suggests. Re-running on unseen

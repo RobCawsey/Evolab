@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 7</title>
+    <title>Evolab — slice 8</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -113,7 +113,20 @@
       .badge.evolved { color: var(--amber); border-color: #4a3b1f; }
 
       /* right panel */
-      #chart { display: block; width: 100%; height: 190px; }
+      /*
+        flex: none because the right column is a flex column that scrolls. Without it both
+        canvases are shrunk to fit — the chart was quietly rendering 28px shorter than its
+        declared height — and a square behaviour map ends up a third of the size it asks for.
+      */
+      #chart { display: block; flex: none; width: 100%; height: 190px; }
+      /*
+        The canvas is wrapped rather than carrying .explorer-only itself. A stage rule is
+        `body[data-stage=…] .explorer-only`, which loses on specificity to an id selector —
+        so `#archive { display: block }` silently kept the map visible in the guided flow.
+        Hiding the wrapper keeps the display mode and the stage gating in separate rules.
+      */
+      .arch-wrap { flex: none; }
+      #archive { display: block; width: 100%; height: 250px; cursor: crosshair; }
       .legend {
         display: flex; gap: 12px; padding: 6px 10px; font-family: var(--mono); font-size: 10px;
         color: var(--faint); border-bottom: 1px solid var(--line);
@@ -310,6 +323,20 @@
         <div class="ph lab-only">Islands<span class="sp"></span><em>ring · 2 elites every 5 gens</em></div>
         <div class="stats lab-only" id="islands"></div>
 
+        <div class="ph explorer-only">Behaviour map<span class="sp"></span><em id="arch-cov">nothing yet</em></div>
+        <div class="arch-wrap explorer-only"><canvas id="archive"></canvas></div>
+        <div class="stats explorer-only">
+          <div class="kv"><span>coverage</span><b id="arch-pct">—</b></div>
+          <div class="kv"><span>best cell</span><b class="am" id="arch-best">—</b></div>
+          <div class="kv lab-only"><span>quality–diversity</span><b id="arch-qd">—</b></div>
+          <div class="kv lab-only"><span>new ways found</span><b id="arch-rate">—</b></div>
+        </div>
+        <div class="note explorer-only" id="arch-note">
+          Every gait that survived a whole trial, filed by <em>how</em> it moved rather than how
+          well: stride length across, duty factor up. Nothing in the score mentions either, so
+          the spread is what the search found rather than what it was told to look for. Click a
+          cell to load that gait into the sliders.
+        </div>
         <div class="ph">Champion</div>
         <div class="stats">
           <div class="kv"><span>distance</span><b class="am" id="c-dist">—</b></div>

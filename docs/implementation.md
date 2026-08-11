@@ -1501,44 +1501,328 @@ is a feature.
 
 ## Slice 8 — Behaviour archive
 
-> **Status: next.** Two sessions.
+> **Status: built.** One session.
 
 ### Goal
 
 MAP-Elites running alongside the GA: a 24 × 24 grid keyed by behaviour, each cell holding
-the fittest genome exhibiting that behaviour.
+the fittest genome that has ever behaved that way. The genetic algorithm answers *what is
+the best gait?*; the archive answers *what kinds of gait are there, and how good is the best
+one of each kind?* — which, for a teaching tool, is the better question.
 
-### Design sketch
+### Depends on
 
-Descriptors: **stride length** (0.15–0.95 m) on one axis, **duty factor** (0.35–0.85) on
-the other. Both are computed from foot-contact events during evaluation, so `TrialResult`
-gains `strideLength` and `dutyFactor`.
+Slice 2 (`evaluatePending`, where every trial passes through exactly once) and slice 4 (the
+worker pool, which is what the delta protocol exists to serve).
+
+### Design
+
+Two descriptors, both **measured during evaluation and neither scored**:
+
+| Axis | Range | Bins | What it is |
+|---|---|---|---|
+| stride length | 0 – 1.4 m | 24 | mean forward displacement between consecutive touchdowns of the *same* foot |
+| duty factor | 0.5 – 1.0 | 24 | fraction of the trial each foot spent on the ground, averaged over both |
+
+`TrialResult` gains `strideLength` and `dutyFactor`. Nothing in `score` reads either, which
+is the entire point: the spread across the grid is a fact about what the search *found*, not
+about what it was told to look for.
 
 ```ts
 export function archiveInsert(
-  archive: Archive, genome: Genome, behaviour: [number, number], fitness: number
-): boolean;    // true if it claimed or improved a cell
+  archive: Archive, genome: Genome, behaviour: readonly [number, number],
+  fitness: number, generation?: number,
+): boolean;    // true if it claimed an empty cell or beat the incumbent
 ```
 
-One map insert per evaluation. Render as a single `ImageData` blit rather than 576 DOM
-nodes.
+One offer per evaluation, made inside `evaluatePending` rather than at the end of a
+generation — elites are never re-evaluated, so making the offer where the trial happens is
+what stops a carried elite being counted every generation and quietly halving the reported
+improvement rate.
 
-This is the slice that makes the search legible: coverage is an honest measure where a
-maximum is a single lucky cell. It is also a natural stopping point for the project.
+### Foot contact is geometry, not an event queue
+
+The obvious way to detect a footfall is Rapier's `EventQueue` or `world.contactPair`. This
+slice does neither. The feet are boxes, the ground is a plane at y = 0, and the trial
+already takes a snapshot every step — so the lowest corner of an oriented box,
+
+```ts
+y - (|halfWidth · sin θ| + |halfHeight · cos θ|) <= CONTACT_EPSILON
+```
+
+is cheaper, has no subscription to set up, and is trivially testable in Node. **Revisit when
+the floor stops being flat** (slice 14): a box against a slope is still easy, a box against
+arbitrary terrain is not.
+
+`CONTACT_EPSILON` is 5 mm, and it was **swept rather than guessed**. Against the reference
+champion, touchdowns per foot are a flat 7 for every threshold from 1 mm to 10 mm and
+collapse to 3 at 20 mm, where separate steps begin merging into one. Duty factor drifts
+0.78 → 0.84 across that flat region, so the number is not threshold-free — but it is stable
+well either side of the value chosen, and that gait lifts its feet 58 mm and 135 mm, an
+order of magnitude clear of any of it. A test asserts the clearance, so if a physics or
+morphology change ever shrinks it, the descriptors do not quietly become threshold-dependent.
+
+### The ranges came from measurement, and the first draft was wrong
+
+The original sketch in this document said stride 0.15–0.95 m and duty 0.35–0.85. Both were
+wrong, and running the thing is what showed it:
+
+- **Duty 0.35 wasted two thirds of the grid.** 0.5 is the textbook line between walking and
+  running, and it is a fine thing to anchor an axis to — but this morphology never gets
+  airborne, so the first draft's rows 0–18 stayed permanently empty. The lower bound is now
+  0.5 and rows 9–22 fill in a 30-generation run. The band that is still empty at the bottom
+  is informative rather than wasted: it is the visible fact that this biped does not run.
+- **Stride 0.95 was too low a ceiling.** The reference champion strides 0.92 m, so it would
+  have sat in the last column with nothing above it. 1.4 m leaves headroom for the long runs.
+
+Values outside a range **clamp into the edge bin rather than being discarded**. A gait
+outside the map is still a gait; dropping it would make coverage read better than it is and
+would hide exactly the outliers worth looking at.
+
+### What counts as a behaviour
+
+`behaviourOf(result)` returns `null` for a trial that fell, and the island skips it. This is
+a judgement about what the map *means*, not an optimisation, and it lives in one named
+function so that changing it is one edit:
+
+> Descriptors from a robot that toppled at 0.4 s describe the topple, not a gait. Letting
+> them in fills the corners with noise that no later genome can displace, because the
+> incumbent's fitness came mostly from having survived.
+
+So the map is a repertoire of gaits that hold up for a whole trial, and it starts empty
+because at generation zero nothing does.
+
+Ties lose. Equal fitness in an occupied cell keeps the older genome, which makes the map
+stable to look at — a cell that stops changing has genuinely converged rather than churning
+between equivalent genomes every generation.
+
+### Four islands, one map
+
+Each worker keeps its own archive and reports **only the cells that changed**, as five
+parallel typed arrays that are transferred rather than cloned:
+
+```ts
+export interface ArchiveDelta {
+  readonly index: Int32Array;       // flat cell indices
+  readonly fitness: Float32Array;
+  readonly behaviour: Float32Array; // 2 per index
+  readonly genes: Float32Array;     // genomeLength per index
+  readonly generation: Int32Array;
+  readonly genomeLength: number;
+}
+```
+
+The worker diffs against a shadow `Float32Array` of last-reported fitness per cell, seeded
+with `NaN` so the first report of any cell always differs — the one occasion `NaN !== NaN`
+is convenient. Comparing fitness is sufficient because ties lose on insert, so a cell whose
+fitness has not moved has not changed. A generation typically changes single figures of
+cells, a few hundred bytes; sending all 576 every generation would cost more than the search.
+
+`IslandPool` folds every delta into one combined `Archive` via `archiveInsert`, **not** a
+bulk copy, so a collision between two islands resolves under exactly the rule each island
+used on itself. Islands are independent searches with different seeds and routinely find the
+same cell, so this is the normal case rather than an edge one. The union is what is
+displayed: per-island coverage would mostly show that four small searches each cover less
+than one big one, which is true and not the point.
+
+### Rendering
+
+One `ImageData` at one pixel per cell, blitted into an offscreen canvas and scaled up with
+smoothing off. The map changes a few times a second at four workers while the replay runs at
+sixty, so `paintArchive` repaints only when `pool.archiveRevision` or the hover cell moves —
+the difference between one blit a second and sixty. A grid of 576 divs would have spent more
+time in style recalculation than the search spent evolving.
+
+Colour is normalised to the **best cell in the map**, not to an absolute scale, because early
+on the whole map is dim and that is exactly when it has the most to say. The consequence —
+that colour is not comparable between two screenshots taken at different times — is why the
+best cell's actual fitness is printed underneath.
+
+Hovering a cell reports its stride, duty, fitness and the generation it was found.
+**Clicking loads that genome into the sliders**, reusing the path *Copy champion to sliders*
+already takes, and putting the gait somewhere the reader can take it apart — which is the
+reason the archive stores genomes and not just fitness.
+
+`npm run evolve` prints the same map as ASCII at four cells per character, so its shape is
+visible without a browser.
+
+### Two numbers worth more than best fitness
+
+- **Coverage.** Best fitness can sit still for twenty generations while the map is still
+  filling. A run ending with one brilliant cell and 575 empty ones has not explored,
+  whatever its maximum says.
+- **Improvement rate** (`improvements / attempts`). It falls steadily through a run, and
+  watching it fall is a clearer signal that the search has stopped exploring than a flat
+  best-fitness line.
+
+### Measured
+
+Single island, seed 4417, 30 generations — the golden run:
+
+```
+champion     fitness 6.4598      (unchanged — the archive does not touch the search)
+  stride     0.923 m             (behaviour — not scored)
+  duty       0.800               (behaviour — not scored)
+archive      138 of 576 cells (24.0% coverage), QD score 547.7
+  offers     547 trials survived to be filed, 293 claimed or improved a cell (54%)
+```
+
+Four islands in the browser, same 30 generations: **254 of 576 cells, 44.1% coverage**, best
+cell 6.769, improvement rate down to 9% of trials by the end.
+
+### Done when
+
+- [x] `TrialResult` carries `strideLength` and `dutyFactor`, both measured from foot contact.
+- [x] The contact threshold was swept, not chosen by taste, and the sweep is recorded.
+- [x] `archiveInsert` claims, improves, and refuses ties; genomes are **copied** on insert.
+- [x] Every island fills an archive; the pool merges four of them into one.
+- [x] The map renders as a single `ImageData` blit and repaints only when it changes.
+- [x] Hovering reports a cell; clicking loads its gait into the sliders.
+- [x] `npm run evolve` reports coverage, QD score, improvement rate and an ASCII map.
+- [x] The golden test still returns 6.4598, and a test asserts the population is bit-identical
+      to a run whose archive is discarded every generation.
+
+### Deliberately not in this slice
+
+**Not a MAP-Elites *search*.** The archive is an observation of the GA, never an input to
+it: nothing selects parents from the map, and a test drains one island's archive every
+generation and asserts the population stays bit-identical. Real MAP-Elites would sample
+parents from the grid, which is a different algorithm with a different convergence story and
+would make the stepper — which draws tournament selection — a lie.
+
+**No archive persistence.** Coverage resets when the body changes, which is correct: every
+cell was measured on the old legs. Storing runs is §11's immutability rule and needs the
+server.
+
+**No third descriptor.** A 24 × 24 grid is legible at a glance; 24³ is 13,824 cells that a
+662-trial run would leave 95% empty, and it cannot be drawn as one image.
+
+**No per-island maps in the UI.** The union is the interesting claim. Per-island views are a
+tab's worth of work whenever they are actually wanted.
 
 ---
 
-## Slices 9–14 — Later stages
+## Slice 9 — 3D replay
+
+> **Status: next.** Two or three sessions. The largest single slice in the project, and the
+> first one that can make everything before it slower without making anything better.
+
+### Goal
+
+Watch the champion walk in a 3D scene with an orbit camera and a timeline scrubber, while
+the 2D view stays exactly as it is. §9 of the design document.
+
+### Depends on
+
+Everything. The archive is the last slice that changes how the search works; this one only
+changes how it is watched.
+
+### The decision to make first: does the physics move to 3D?
+
+Two honest options, and the answer is not obvious.
+
+**A — render 3D, simulate 2D.** The sagittal simulation stays as it is; the renderer extrudes
+each segment into a box and mirrors the far leg properly instead of nudging it sideways with
+`FAR_LEG_RENDER_OFFSET`. Cheap, keeps every number in the project valid, keeps the golden
+test meaningful, and ships in one session. The robot cannot fall sideways, ever, and a viewer
+who orbits to the front will see that immediately.
+
+**B — move to `rapier3d`.** The morphology gains a third dimension and roll joints, and the
+biped can now fall sideways — which is realistic and which the eleven-gene sagittal genome
+has no way to correct. Every fitness number in the project is invalidated. The golden test
+has to be re-pinned. It is a slice and a half of work before anything walks again.
+
+**Take A, and say so in the UI.** The teaching claim this project makes is about evolution,
+not about robotics fidelity, and B spends its entire budget buying a failure mode the
+controller cannot address. B is worth revisiting only if the genome grows a lateral term,
+which is slice 14 territory at the earliest. Write the reasoning into §9 as an amendment the
+way slice 7 amended §12 about React, because "why is it flat?" is the first question any
+reader will ask.
+
+### Design
+
+Three.js, loaded **only when the 3D tab is first opened**. It is roughly 600 kB and the
+guided flow never needs it; a dynamic `import()` keeps it out of the first paint. That is
+also the test of whether the render layer is properly separated — if `render/three/` cannot
+be code-split out, something below `apps/web` has reached up into it.
+
+```
+apps/web/src/render/three/
+  scene.ts      lights, ground grid, camera rig — built once, reused across replays
+  bodies.ts     Snapshot → instanced boxes; one InstancedMesh, not N meshes
+  controls.ts   orbit + the scrubber
+```
+
+`Snapshot` already carries everything needed: id, x, y, angle, halfWidth, halfHeight, layer.
+The third dimension is a constant per `layer` — near leg at z = +0.09, far leg at z = −0.09,
+torso at 0 — so `bodies.ts` is a pure function from a snapshot to instance matrices and can
+be tested in Node without a canvas.
+
+**The scrubber needs recorded frames, which do not exist yet.** `evaluate` currently returns
+numbers and throws the trajectory away. Add an opt-in:
+
+```ts
+evaluate(morph, genome, { seed, seconds, record: true })   // → TrialResult & { frames }
+```
+
+recording one `Float32Array` per body per control tick (60 Hz, not 240 — four times fewer
+frames and nothing visible is lost). A 4-second trial is 240 frames × 7 bodies × 3 floats ≈
+20 kB, which is nothing. It must stay **off by default**: the inner loop runs tens of
+thousands of times per study and must not allocate.
+
+Slice 10's footfall diagram and joint-angle traces read the same recording, so the format is
+worth getting right here.
+
+### Watch for
+
+- **The replay loop is already fixed-timestep.** The 3D view renders whatever the accumulator
+  has stepped to; it does not get its own clock. Invariant 1 is not negotiable because
+  something has an orbit camera now.
+- **`FAR_LEG_RENDER_OFFSET` is 2D-only.** In 3D the legs are genuinely separated, so the fudge
+  must not be applied — and the convention note in `CLAUDE.md` about zeroing it when checking
+  a screen position against a world coordinate needs updating to say which renderer it means.
+- **One `InstancedMesh`.** Seven boxes per robot is nothing, but ghost overlays in slice 10
+  multiply that by however many ghosts, and retrofitting instancing later is worse than
+  starting with it.
+- **Dispose geometries and materials** when the tab closes. Three.js leaks GPU memory exactly
+  as enthusiastically as Rapier leaks WASM memory, and the lesson from `sim.dispose()` applies
+  unchanged.
+
+### Done when
+
+- [ ] A 3D tab shows the champion walking, orbitable, with a ground plane and a grid.
+- [ ] Three.js is dynamically imported and absent from the initial bundle.
+- [ ] The 2D view is untouched and remains the default.
+- [ ] A scrubber seeks to any frame of a recorded trial and the 3D and 2D views agree on it.
+- [ ] `record: true` produces frames; `record` unset allocates nothing extra — asserted by a
+      test that counts allocations or, failing that, by a trials/s benchmark that has not moved.
+- [ ] `npm test` still passes and the golden number is still 6.4598, because none of this
+      touches the search.
+
+### Deliberately not in this slice
+
+No 3D physics — see above, and write the reasoning down where a reader will find it.
+
+No ghost overlays, no footfall diagram, no joint traces. Those are slice 10 and they all
+read the recording this slice defines; building the recording well is this slice's real
+contribution.
+
+No mesh import, no textures, no shadows beyond a single directional light. A grey box robot
+on a grid reads better for teaching than a styled one, and every hour spent on materials is
+an hour not spent on slice 10.
+
+---
+
+## Slices 10–14 — Later stages
 
 Sketches only. Each will be written out fully at the end of the slice before it.
 
 | # | Name | Shape of the work |
 |---|---|---|
-| 9 | **3D replay** | Three.js scene, instanced ghosts, orbit camera, timeline scrubber. Physics moves to `rapier3d`; the morphology gains a third dimension and roll joints. The 2D mode stays — it remains the teaching surface. |
-| 10 | **Gait analysis** | Footfall diagram from contact events, joint-angle traces, hip phase portrait. All share one scrubber with the replay. Recording is already a flag on `evaluate`. |
+| 10 | **Gait analysis** | Footfall diagram, joint-angle traces, hip phase portrait. All share one scrubber with the replay. Slice 8 already detects foot contact and slice 9 already records frames; this slice draws them. |
 | 11 | **Challenge track** | Twelve challenges as JSON data, per-concept progress, the deliberately-naïve fitness challenge from §7 of the design document. Task definitions load as data, not code. |
 | 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. |
-| 13 | **Community archive** | Publish elites; merged grid across all published runs. Reuses the archive merge that already exists as island migration. |
+| 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |
 | 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |
 
 ---

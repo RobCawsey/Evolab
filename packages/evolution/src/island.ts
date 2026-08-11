@@ -7,6 +7,7 @@
  * golden test does not depend on the physics.
  */
 
+import { archiveInsert, behaviourOf, createArchive, type Archive } from './archive.ts';
 import { GENOME_LENGTH, type Genome } from './controller.ts';
 import { DEFAULT_OBJECTIVE, score, type Objective, type TrialResult } from './fitness.ts';
 import {
@@ -70,6 +71,14 @@ export interface Island {
   readonly config: IslandConfig;
   generation: number;
   population: Individual[];
+  /**
+   * Every trial this island has run, filed by how the robot moved rather than by how well.
+   *
+   * It rides along with the search and never steers it: nothing here feeds back into
+   * selection. Remove it and the run is bit-identical — which is what makes it an honest
+   * observation of the search instead of a second search.
+   */
+  readonly archive: Archive;
 }
 
 export interface GenerationSummary {
@@ -99,7 +108,7 @@ export function createIsland(
   for (let i = 0; i < cfg.size; i++) {
     population.push({ genes: randomGenome(cfg.genomeLength, rng), fitness: 0, result: null });
   }
-  return { id, rng, config: cfg, generation: 0, population };
+  return { id, rng, config: cfg, generation: 0, population, archive: createArchive() };
 }
 
 /** How many individuals still need a trial before this generation can complete. */
@@ -138,6 +147,12 @@ export function evaluatePending(
     const result = evaluate(ind.genes, cfg.trialSeed);
     ind.result = result;
     ind.fitness = score(result, cfg.trialSeconds, cfg.objective).total;
+    // One offer per trial, here rather than at the end of the generation, so that elites —
+    // which are never re-evaluated — are also never offered twice.
+    const behaviour = behaviourOf(result);
+    if (behaviour !== null) {
+      archiveInsert(island.archive, ind.genes, behaviour, ind.fitness, island.generation);
+    }
     evaluations++;
   }
   return evaluations;

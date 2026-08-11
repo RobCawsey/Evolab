@@ -21,6 +21,10 @@ function fakeEvaluate(genome: Genome, seed: number): TrialResult {
     effort: 60 + 40 * genome[1]! + seed * 0.01,
     fell: uprightTime < 3.9,
     duration: uprightTime,
+    // Synthetic behaviour descriptors. Nothing in score() reads them, so they cannot move
+    // the golden numbers; they exist so the archive has something to spread across.
+    strideLength: 0.5 + 0.4 * genome[2]!,
+    dutyFactor: 0.4 + 0.5 * genome[3]!,
   };
 }
 

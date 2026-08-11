@@ -8,9 +8,9 @@
  * another island.
  */
 
-import type { GenerationSummary, IslandConfig, Morphology } from '@evolab/evolution';
+import { createArchive, type Archive, type GenerationSummary, type IslandConfig, type Morphology } from '@evolab/evolution';
 import type { FromWorker, IslandSetup, ToWorker } from './protocol.ts';
-import { transferable } from './protocol.ts';
+import { applyArchiveDelta, transferable } from './protocol.ts';
 
 export interface PoolOptions {
   readonly morphology: Morphology;
@@ -57,6 +57,17 @@ export function defaultWorkerCount(): number {
 
 export class IslandPool {
   readonly islands: IslandState[] = [];
+  /**
+   * Every island's map, folded into one.
+   *
+   * Deliberately a union rather than a per-island view. Islands are independent searches
+   * with different seeds, and the interesting claim — that the population as a whole holds
+   * a repertoire of gaits — is about the union. Per-island coverage would mostly show that
+   * four small searches each cover less than one big one, which is true and not the point.
+   */
+  readonly archive: Archive = createArchive();
+  /** Bumped whenever a cell changes, so the renderer can skip a repaint that would be identical. */
+  archiveRevision = 0;
   private readonly workers: Worker[] = [];
   private readonly opts: PoolOptions;
   private readonly events: PoolEvents;
@@ -129,6 +140,7 @@ export class IslandPool {
           island.boosted = true;
           island.migrantsIn = 0;
         }
+        if (applyArchiveDelta(this.archive, message.archive) > 0) this.archiveRevision++;
         this.events.onGeneration?.(message.islandId, message.summary);
         return;
       }

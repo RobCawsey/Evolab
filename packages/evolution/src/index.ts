@@ -37,6 +37,21 @@ export {
 } from './operators.ts';
 export type { GeneChange } from './operators.ts';
 
+export {
+  createArchive,
+  archiveInsert,
+  archiveIndex,
+  archiveCoverage,
+  archiveBest,
+  archiveQd,
+  archiveMerge,
+  behaviourOf,
+  binOf,
+  DEFAULT_STRIDE_AXIS,
+  DEFAULT_DUTY_AXIS,
+} from './archive.ts';
+export type { Archive, ArchiveAxis, ArchiveCell } from './archive.ts';
+
 export { score, DEFAULT_OBJECTIVE } from './fitness.ts';
 export type { TrialResult, Objective, FitnessBreakdown } from './fitness.ts';
 

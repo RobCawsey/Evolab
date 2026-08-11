@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Rng, defaultGait, gaitTargets, simpleBiped, type GaitParams } from '@evolab/evolution';
-import { MOTOR_STIFFNESS, Sim, TIMESTEP, initPhysics, spawnFalling, stepControlled } from '@evolab/sim';
+import { Rng, decodeGenome, defaultGait, gaitTargets, simpleBiped, type GaitParams } from '@evolab/evolution';
+import { MOTOR_STIFFNESS, Sim, TIMESTEP, evaluate, evaluateGait, initPhysics, spawnFalling, stepControlled } from '@evolab/sim';
 
 const morph = simpleBiped();
 
@@ -209,5 +209,77 @@ describe('Sim', () => {
     // where thousands of sims are created per generation.
     for (let i = 0; i < 200; i++) new Sim(morph, { tilt: 0 }).dispose();
     expect(run(new Sim(morph, { tilt: 0 }), 0.5, still()).fallen).toBe(false);
+  });
+});
+
+describe('gait descriptors', () => {
+  // Stride length and duty factor are what the behaviour archive keys on, and unlike
+  // fitness nothing selects for them — so if they are wrong, nothing else in the project
+  // goes red. These are the only thing standing between a plausible-looking map and a map
+  // that means nothing.
+
+  it('reports a statue as never striding and always in stance', () => {
+    // Zero amplitude everywhere: the feet are planted at t = 0 and never move. Duty must be
+    // exactly 1 and there can be no stride, because a stride is one touchdown to the next.
+    const r = evaluateGait(morph, still(), { seed: 0, seconds: 2, tiltRange: 0 });
+    expect(r.fell).toBe(false);
+    expect(r.dutyFactor).toBe(1);
+    expect(r.strideLength).toBe(0);
+  });
+
+  it('measures a real walk against the distance it covered', () => {
+    // The reference champion — seed 4417, 30 generations, the gait behind the golden 6.4598.
+    const champion = Float32Array.from([
+      0.468684, 0.639280, 0.861243, 0.339522, 0.937122, 0.078753,
+      0.725578, 0.780452, 0.626414, 0.682012, 0.477553,
+    ]);
+    const r = evaluate(morph, champion, { seed: 0, seconds: 4 });
+
+    expect(r.fell).toBe(false);
+    expect(r.distance).toBeCloseTo(5.96, 1);
+    expect(r.strideLength).toBeCloseTo(0.923, 2);
+    expect(r.dutyFactor).toBeCloseTo(0.80, 2);
+
+    // The independent check: this gait steps about 1.6 times a second for 4 seconds, so
+    // stride × cycles has to come back to the distance actually travelled. A descriptor
+    // that did not close this loop would be measuring something other than a stride.
+    const cycles = r.distance / r.strideLength;
+    expect(cycles).toBeGreaterThan(5);
+    expect(cycles).toBeLessThan(8);
+
+    // Between 0.5 and 1 it is walking with double support. Below 0.5 there is a flight
+    // phase, and this morphology does not run.
+    expect(r.dutyFactor).toBeGreaterThan(0.5);
+    expect(r.dutyFactor).toBeLessThan(1);
+  });
+
+  it('is insensitive to the exact contact threshold', () => {
+    // The threshold was swept before it was chosen: touchdowns are a flat 7 per foot from
+    // 1 mm to 10 mm. This asserts the consequence — that the champion's feet clear the
+    // ground by centimetres, so no plausible epsilon changes the answer. If a physics or
+    // morphology change ever shrinks that clearance, the descriptors quietly become
+    // threshold-dependent and this is what says so.
+    const sim = new Sim(morph, { tilt: 0 });
+    const params = decodeGenome(Float32Array.from([
+      0.468684, 0.639280, 0.861243, 0.339522, 0.937122, 0.078753,
+      0.725578, 0.780452, 0.626414, 0.682012, 0.477553,
+    ]));
+    const scratch = new Map<string, number>();
+    let peakClearance = 0;
+    try {
+      for (let i = 0; i < Math.round(4 / TIMESTEP); i++) {
+        stepControlled(sim, morph, params, 1, scratch);
+        for (const b of sim.snapshot().bodies) {
+          if (b.id !== 'footL' && b.id !== 'footR') continue;
+          const low =
+            b.y - (Math.abs(b.halfWidth * Math.sin(b.angle)) +
+                   Math.abs(b.halfHeight * Math.cos(b.angle)));
+          if (low > peakClearance) peakClearance = low;
+        }
+      }
+    } finally {
+      sim.dispose();
+    }
+    expect(peakClearance).toBeGreaterThan(0.04);
   });
 });

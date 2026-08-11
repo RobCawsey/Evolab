@@ -18,6 +18,37 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 8 — "Behaviour archive".** A MAP-Elites grid rides alongside the GA: 24 × 24 cells
+keyed by **stride length** (0–1.4 m) and **duty factor** (0.5–1.0), each holding the fittest
+genome that ever behaved that way. Hover a cell for its numbers; click it to load that gait
+into the sliders. `npm run evolve` prints the same map as ASCII.
+
+**Neither descriptor is scored.** That is the whole point — nothing selects for them, so the
+spread across the grid is a fact about what the search *found* rather than what it was told
+to look for. A run ending with one brilliant cell and 575 empty ones has not explored,
+whatever its maximum says. Coverage and the improvement rate are both better signals of a
+stalled search than a flat best-fitness line.
+
+**The archive observes the search and is never an input to it.** A test drains one island's
+archive every generation and asserts the population stays bit-identical; the golden 6.4598 is
+unchanged. Making it a real MAP-Elites search — sampling parents from the grid — is a
+different algorithm, and it would make the slice 5 stepper, which draws tournament selection,
+a lie.
+
+Foot contact is a **geometry test on the snapshot**, not a Rapier `EventQueue`: the ground is
+a plane at y = 0 and the feet are boxes, so the lowest corner of an oriented box is cheaper
+and testable in Node. The 5 mm threshold was **swept, not guessed** — touchdowns are flat at
+7 per foot from 1 mm to 10 mm and collapse at 20 mm. Revisit when the floor stops being flat.
+
+Both axis ranges in the original spec were wrong and running it is what showed it. Duty
+0.35–0.85 wasted two thirds of the grid because this biped never gets airborne; stride
+capping at 0.95 m put the champion (0.923 m) in the last column with no headroom.
+
+Workers report **only the cells that changed**, as transferred typed arrays, and `IslandPool`
+folds them into one map through `archiveInsert` so a collision between islands resolves under
+the same rule each island used on itself. Single island, 30 generations: 24% coverage. Four
+islands, same 30: **44%**.
+
 **Slice 7 — "Body editor".** In Lab, the biped is editable: segment lengths and widths,
 foot geometry, density, with live mass, height, balance margin and hip load, and validation
 that explains *why* a body cannot work rather than just refusing it. Bodies round-trip
@@ -98,9 +129,14 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 8 — the MAP-Elites behaviour archive, and a natural stopping point for the
-project. Specified in
-[docs/implementation.md](docs/implementation.md#slice-8--behaviour-archive).
+Next: slice 9 — the 3D replay. Specified in
+[docs/implementation.md](docs/implementation.md#slice-9--3d-replay), including the decision
+it opens with: **render in 3D but keep simulating in 2D**, because moving to `rapier3d`
+invalidates every fitness number in the project in order to buy a sideways fall the
+eleven-gene sagittal genome has no way to correct.
+
+Slice 8 was the natural stopping point. Everything from here changes how the search is
+watched, not how it works.
 
 Two rules the GA earned the hard way, both written up in the slice 2 section:
 
@@ -144,7 +180,7 @@ the app still works.
 ## Layout
 
 ```
-packages/evolution/   pure TS — rng, types; later: GA operators, fitness, archive
+packages/evolution/   pure TS — rng, types, GA operators, fitness, behaviour archive
 packages/sim/         Rapier wrapper — morphology → world, step, record
 apps/web/             Vite app — canvas render, later React panels and workers
 docs/                 the technical design document
@@ -163,9 +199,9 @@ npm run check        # typecheck everything
 npm run sim          # headless: step the biped in Node, print positions
 ```
 
-`npm test` is 53 tests in about 1.5 s, so there is no excuse for not running it. It covers
-the RNG (including a pinned golden vector), the controller, the morphology, and the
-physics — the last of these builds real Rapier worlds and is still fast enough to sit in
+`npm test` is 149 tests in about 1.5 s, so there is no excuse for not running it. It covers
+the RNG (including a pinned golden vector), the controller, the morphology, the archive, and
+the physics — the last of these builds real Rapier worlds and is still fast enough to sit in
 the inner loop.
 
 `npm run sim` exists because invariants 3 and 4 make it possible, and because verifying

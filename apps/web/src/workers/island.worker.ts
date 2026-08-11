@@ -19,7 +19,7 @@ import {
 } from '@evolab/evolution';
 import { initPhysics, makeEvaluator } from '@evolab/sim';
 import type { FromWorker, IslandSetup, ToWorker } from './protocol.ts';
-import { transferable } from './protocol.ts';
+import { archiveTransferable, packArchiveDelta, transferable } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -30,6 +30,8 @@ let running = false;
 let target = 0;
 /** Migrants that arrived while a generation was in flight, applied at the next boundary. */
 let mailbox: Genome[] = [];
+/** Last-reported fitness per archive cell, so each generation only sends what moved. */
+let archiveShadow = new Float32Array(0);
 
 function post(message: FromWorker, transfer?: Transferable[]): void {
   if (transfer && transfer.length > 0) ctx.postMessage(message, transfer);
@@ -68,7 +70,11 @@ async function loop(): Promise<void> {
     }
     const evalMs = performance.now() - started;
 
-    post({ type: 'generation', islandId: setup.islandId, summary, evalMs });
+    const archive = packArchiveDelta(island.archive, archiveShadow, island.config.genomeLength);
+    post(
+      { type: 'generation', islandId: setup.islandId, summary, evalMs, archive },
+      archiveTransferable(archive),
+    );
 
     if (setup.migrationInterval > 0 && island.generation % setup.migrationInterval === 0) {
       const genomes = emigrants(island, setup.migrantCount);
@@ -94,6 +100,7 @@ ctx.onmessage = (event: MessageEvent<ToWorker>) => {
         await initPhysics();
         island = createIsland(setup!.islandId, setup!.seed, setup!.config);
         evaluate = makeEvaluator(setup!.morphology, { seconds: setup!.trialSeconds });
+        archiveShadow = new Float32Array(island.archive.cells.length).fill(NaN);
         post({ type: 'ready', islandId: setup!.islandId, initMs: performance.now() - started });
       })();
       return;

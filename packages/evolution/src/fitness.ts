@@ -25,6 +25,23 @@ export interface TrialResult {
   readonly fell: boolean;
   /** Trial length actually simulated, seconds. Shorter than requested if it fell early. */
   readonly duration: number;
+  /**
+   * Mean forward displacement between consecutive touchdowns of the same foot, metres.
+   *
+   * A *stride*, not a step: heel-strike to the next heel-strike of that same foot, which is
+   * one whole gait cycle and therefore two steps. Zero means the robot never put a foot
+   * down twice — it stood, slid, or fell before completing a cycle.
+   *
+   * Behaviour, not quality. Nothing in `score` reads it; it is what the archive keys on.
+   */
+  readonly strideLength: number;
+  /**
+   * Fraction of the trial each foot spent on the ground, averaged over both feet.
+   *
+   * The textbook gait descriptor. Above 0.5 there is double support and it is walking;
+   * below 0.5 there is a flight phase and it is running; at 1.0 it never lifted a foot.
+   */
+  readonly dutyFactor: number;
 }
 
 /** Weights for the default objective. Every term is separable and separately reported. */

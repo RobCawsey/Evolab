@@ -8,8 +8,11 @@
 
 import {
   DEFAULT_SPEC,
+  archiveCoverage,
+  archiveQd,
   buildBiped,
   clampSpec,
+  decodeGenome,
   defaultGait,
   gaitPhase,
   Rng,
@@ -19,6 +22,7 @@ import {
 import { initPhysics, Sim, stepControlled, TIMESTEP } from '@evolab/sim';
 import { draw } from './render/draw.ts';
 import { drawChart } from './render/chart.ts';
+import { cellAt, drawArchive, type ArchiveView } from './render/archive.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createGuided } from './ui/guided.ts';
@@ -33,6 +37,7 @@ import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/lo
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const stage = el<HTMLCanvasElement>('stage');
 const chart = el<HTMLCanvasElement>('chart');
+const archiveCanvas = el<HTMLCanvasElement>('archive');
 
 function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const ctx = canvas.getContext('2d');
@@ -42,6 +47,7 @@ function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
 
 const sctx = context2d(stage);
 const cctx = context2d(chart);
+const actx = context2d(archiveCanvas);
 
 const hud = {
   time: el('v-time'), distance: el('v-distance'), phase: el('v-phase'),
@@ -51,6 +57,10 @@ const stat = {
   gen: el('s-gen'), progress: el('s-progress'), best: el('s-best'), mean: el('s-mean'),
   div: el('s-div'), trials: el('s-trials'), tps: el('s-tps'), gps: el('s-gps'),
   elapsed: el('s-elapsed'), chartGen: el('chart-gen'), speedup: el('s-speedup'),
+};
+const arch = {
+  cov: el('arch-cov'), pct: el('arch-pct'), best: el('arch-best'),
+  qd: el('arch-qd'), rate: el('arch-rate'),
 };
 const champ = {
   dist: el('c-dist'), upright: el('c-upright'), effort: el('c-effort'),
@@ -315,6 +325,8 @@ function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   fit(stage, sctx, dpr);
   fit(chart, cctx, dpr);
+  fit(archiveCanvas, actx, dpr);
+  archivePainted = -1;
 }
 
 function frame(now: number): void {
@@ -374,7 +386,82 @@ function frame(now: number): void {
     targetGenerations: state.target,
   });
   paintStats();
+  paintArchive();
 }
+
+/* ---------------- behaviour map ---------------- */
+
+let archiveView: ArchiveView | null = null;
+/** Revision last drawn. The map only changes when a cell does, which is not every frame. */
+let archivePainted = -1;
+let archiveHover: number | null = null;
+
+function paintArchive(): void {
+  const pool = state.pool;
+  if (!pool) return;
+  // The map is not present in the guided flow, where the canvas measures zero. Painting a
+  // zero-width canvas is harmless and pointless; skipping also means the first paint after
+  // switching to Explorer happens at the right size rather than being cached at 24 pixels.
+  if (archiveCanvas.clientWidth === 0) return;
+
+  // Repaint on a cell change, a resize, or a hover move — not on every frame. At four
+  // workers the map changes a few times a second and the replay runs at sixty, so this is
+  // the difference between one blit a second and sixty.
+  const revision = pool.archiveRevision * 4096 + (archiveHover ?? 4095);
+  if (revision !== archivePainted) {
+    const rect = archiveCanvas.getBoundingClientRect();
+    archiveView = drawArchive(actx, pool.archive, rect.width, rect.height, archiveHover);
+    archivePainted = revision;
+  }
+
+  const a = pool.archive;
+  const best = a.filled > 0 ? Math.max(...a.cells.map((c) => c?.fitness ?? 0)) : 0;
+  arch.cov.textContent = a.filled === 0
+    ? 'nothing yet'
+    : `${a.filled} of ${a.cells.length} cells`;
+  arch.pct.textContent = `${(archiveCoverage(a) * 100).toFixed(1)}%`;
+  arch.best.textContent = a.filled > 0 ? best.toFixed(3) : '—';
+  arch.qd.textContent = a.filled > 0 ? archiveQd(a).toFixed(1) : '—';
+  // Improvements per offer. It falls steadily through a run, and watching it fall is a
+  // clearer signal that the search has stopped exploring than a flat best-fitness line —
+  // best fitness can sit still while the map is still filling.
+  arch.rate.textContent = a.attempts > 0
+    ? `${((a.improvements / a.attempts) * 100).toFixed(0)}% of trials`
+    : '—';
+}
+
+archiveCanvas.addEventListener('mousemove', (e) => {
+  const pool = state.pool;
+  if (!pool || !archiveView) return;
+  const rect = archiveCanvas.getBoundingClientRect();
+  const hit = cellAt(pool.archive, archiveView, e.clientX - rect.left, e.clientY - rect.top);
+  archiveHover = hit?.index ?? null;
+  archiveCanvas.title = hit
+    ? `stride ${hit.cell.behaviour[0].toFixed(2)} m · duty ${hit.cell.behaviour[1].toFixed(2)}` +
+      ` · fitness ${hit.cell.fitness.toFixed(3)} · found at generation ${hit.cell.generation}`
+    : '';
+});
+
+archiveCanvas.addEventListener('mouseleave', () => {
+  archiveHover = null;
+});
+
+archiveCanvas.addEventListener('click', (e) => {
+  const pool = state.pool;
+  if (!pool || !archiveView) return;
+  const rect = archiveCanvas.getBoundingClientRect();
+  const hit = cellAt(pool.archive, archiveView, e.clientX - rect.left, e.clientY - rect.top);
+  if (!hit) return;
+
+  // Loading a cell into the sliders rather than into a fourth replay mode. It reuses the
+  // path "Copy champion to sliders" already takes, and it puts the genome somewhere the
+  // reader can then take apart — which is the whole reason the archive stores genomes and
+  // not just fitness.
+  state.manualGait = decodeGenome(hit.cell.genes);
+  panel.sync(state.manualGait);
+  setMode('manual');
+  queueUrl();
+});
 
 function paintStats(): void {
   const pool = state.pool;

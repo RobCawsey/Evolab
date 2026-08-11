@@ -272,6 +272,7 @@ describe('genome codec', () => {
 describe('score', () => {
   const base: TrialResult = {
     distance: 2, uprightTime: 4, effort: 50, fell: false, duration: 4,
+    strideLength: 0.42, dutyFactor: 0.6,
   };
 
   it('sums its terms', () => {
@@ -287,7 +288,7 @@ describe('score', () => {
   it('measures upright against the requested duration, not the truncated one', () => {
     // A genome that falls at 1 s of a 4 s trial must not score as though it survived a
     // 1 s trial — that would make falling over early a winning move.
-    const early: TrialResult = { distance: 2, uprightTime: 1, effort: 50, fell: true, duration: 1 };
+    const early: TrialResult = { distance: 2, uprightTime: 1, effort: 50, fell: true, duration: 1, strideLength: 0.4, dutyFactor: 0.7 };
     expect(score(early, 4).upright).toBeCloseTo(0.5 * 0.25, 10);
   });
 
@@ -299,6 +300,7 @@ describe('score', () => {
   it('never returns a negative total', () => {
     const awful: TrialResult = {
       distance: -50, uprightTime: 0, effort: 9999, fell: true, duration: 0.1,
+      strideLength: 0, dutyFactor: 1,
     };
     expect(score(awful, 4).total).toBe(0);
   });
