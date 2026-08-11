@@ -674,6 +674,30 @@ function fit(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dpr: numb
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+/**
+ * Re-fit a canvas whose CSS box has changed size without a window resize.
+ *
+ * `resize()` only runs on `window.resize`, which misses every layout change the app makes to
+ * itself — and slice 10 added a big one: the gait strip appears and disappears with the
+ * recording, moving the stage between 822 and 1014 pixels tall. The backing store kept its
+ * old size, so the browser stretched it into the new box and the parts the shorter draw no
+ * longer covered kept their previous pixels. On screen that is a ghost strip of ground and
+ * half a leg below the real robot.
+ *
+ * Checked per frame because it is two integer comparisons; re-fitting is what costs, and that
+ * only happens when the size actually moved.
+ */
+function refit(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): boolean {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+  const w = Math.round(rect.width * dpr);
+  const h = Math.round(rect.height * dpr);
+  if (canvas.width === w && canvas.height === h) return false;
+  fit(canvas, ctx, dpr);
+  return true;
+}
+
 function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   fit(stage, sctx, dpr);
@@ -721,8 +745,11 @@ function frame(now: number): void {
     // the cost for nothing, and letting them fall out of step is the bug the shared
     // `Snapshot` exists to prevent.
     if (state.view === '3d' && threeView) {
+      const r3 = stage3d.getBoundingClientRect();
+      threeView.resize(r3.width, r3.height);
       threeView.render(snap);
     } else {
+      refit(stage, sctx);
       const rect = stage.getBoundingClientRect();
       draw(sctx, snap, rect.width, rect.height, focusX);
     }

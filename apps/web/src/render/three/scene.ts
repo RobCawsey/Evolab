@@ -115,6 +115,8 @@ export function createThreeView(canvas: HTMLCanvasElement): ThreeView {
   const axis = new THREE.Vector3(0, 0, 1);
   const colour = new THREE.Color();
   const target = new THREE.Vector3(0, 0.7, 0);
+  /** Scratch for `renderer.getSize`, which writes into a vector rather than returning one. */
+  const measured = new THREE.Vector2();
   let boxes: BoxInstance[] = [];
   let coloured = false;
 
@@ -174,8 +176,18 @@ export function createThreeView(canvas: HTMLCanvasElement): ThreeView {
       renderer.render(scene, camera);
     },
 
+    /**
+     * Idempotent, so the frame loop can call it unconditionally.
+     *
+     * The stage changes height whenever slice 10's gait strip appears or disappears, which is
+     * not a window resize and so does not reach `resize()` in `main.ts`. Making this cheap to
+     * call every frame is simpler than tracking the last size at the call site, and
+     * `updateProjectionMatrix` is not something to run sixty times a second for nothing.
+     */
     resize(width: number, height: number): void {
       if (width <= 0 || height <= 0) return;
+      const size = renderer.getSize(measured);
+      if (size.x === width && size.y === height) return;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
