@@ -228,6 +228,16 @@ status column, and the whole project has five dependencies: TypeScript, Vitest, 
 react-three-fiber, uPlot, Zustand and Comlink — and three of those trace to the single decision
 not to use React. If a dependency is added, that table is the thing to update.
 
+**The chassis degrades below 1000 px** — §10 of the design document. The side panels stop
+taking grid space and become overlay drawers the stage runs under, reached from two toolbar
+buttons; below 600 px the phase portrait goes so the footfall diagram and traces get the full
+width. The two fixed columns are 576 px between them, so at 640 px the stage had been getting
+64 px. **§10 also asks for read-only monitor mode below 600 px and that half is not built** —
+it needs the server.
+
+The toolbar collapses into a ⋯ menu rather than clipping, and the controls are **moved, not
+cloned**, because every one is wired by id in `main.ts`.
+
 ## Invariants
 
 These are the rules that must survive between sessions. Breaking one is a bug even when

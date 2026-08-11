@@ -167,15 +167,50 @@ const toolbar = createToolbar(
   document.querySelector('header .spacer')!,
   [
     { id: 'stages', priority: 7 },
-    { id: 'btn-run', priority: 8 },
+    { id: 'btn-run', priority: 10 },
     { id: 'btn-reset', priority: 3 },
     { id: 'modes', priority: 4 },
     { id: 'btn-adopt', priority: 1 },
     { id: 'views', priority: 5 },
+    // The drawer toggles rank just under Run: below 1000px they are the only way to reach
+    // the side panels at all, so collapsing them into a menu to save room would hide the
+    // controls behind the control that reveals them.
+    { id: 'btn-panel-left', priority: 8 },
+    { id: 'btn-panel-right', priority: 9 },
     { id: 'btn-challenges', priority: 6 },
     { id: 'btn-stepper', priority: 2 },
   ],
 );
+
+/* ---------------- side panels as drawers, below 1000px ---------------- */
+
+/**
+ * §10's chassis change, in the ten lines of state it actually needs.
+ *
+ * The panels are the same elements in both chassis — only their positioning changes, in CSS.
+ * This just decides which is open, and closes the other, because two overlay drawers at once
+ * on a 390px screen leaves nothing to look at.
+ */
+const drawers = [
+  { button: el('btn-panel-left'), panel: document.querySelector<HTMLElement>('aside.left')! },
+  { button: el('btn-panel-right'), panel: document.querySelector<HTMLElement>('aside.right')! },
+];
+
+function setDrawer(open: HTMLElement | null): void {
+  for (const d of drawers) {
+    const isOpen = d.panel === open;
+    d.panel.classList.toggle('open', isOpen);
+    d.button.classList.toggle('on', isOpen);
+  }
+  el('scrim').hidden = open === null;
+}
+
+for (const d of drawers) {
+  d.button.addEventListener('click', () => {
+    setDrawer(d.panel.classList.contains('open') ? null : d.panel);
+  });
+}
+el('scrim').addEventListener('click', () => setDrawer(null));
 
 /* ---------------- replay ---------------- */
 
@@ -431,6 +466,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); setRunning(!state.running); }
   if (e.key === 'r' || e.key === 'R') el('btn-reset').click();
   if (e.key === 'm' || e.key === 'M') setMode(state.mode === 'manual' ? 'evolved' : 'manual');
+  if (e.key === 'Escape') setDrawer(null);
   if (e.key === '2') setView('2d');
   if (e.key === '3') setView('3d');
   if (e.key === 's' || e.key === 'S') stepper.open();

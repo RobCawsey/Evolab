@@ -83,10 +83,57 @@
       .seg button { border: 0; border-radius: 0; background: transparent; color: var(--dim); }
       .seg button.on { background: var(--panel2); color: var(--amber); }
 
-      main { flex: 1; display: grid; grid-template-columns: 236px minmax(0, 1fr) 340px; min-height: 0; }
+      main {
+        flex: 1; display: grid; grid-template-columns: 236px minmax(0, 1fr) 340px;
+        min-height: 0; position: relative;
+      }
       aside { background: var(--panel); overflow-y: auto; display: flex; flex-direction: column; }
       aside.left { border-right: 1px solid var(--line); padding: 10px 12px 20px; }
       aside.right { border-left: 1px solid var(--line); }
+      .narrow-only { display: none; }
+      .scrim { display: none; }
+
+      /*
+        §10 — degrade the chassis, keep the instrument.
+
+        A three-column workbench does not fold into a phone. Below 1000px the side panels stop
+        taking grid space and become overlay drawers that the stage runs underneath. The
+        panels themselves are untouched: same DOM, same ids, same contents, so nothing that
+        reads them needs to know which chassis it is in.
+
+        Not optional, and the arithmetic says why: the two fixed columns are 576px between
+        them, so at 700px the stage was getting 124px and at 640px it was down to 64px.
+      */
+      @media (max-width: 999px) {
+        .narrow-only { display: inline-block; }
+        main { grid-template-columns: minmax(0, 1fr); }
+        aside {
+          position: absolute; top: 0; bottom: 0; z-index: 30;
+          width: min(300px, 86vw);
+          transition: transform .16s ease-out;
+          box-shadow: 0 0 30px rgba(0, 0, 0, .55);
+        }
+        aside.left { left: 0; transform: translateX(-101%); }
+        aside.right { right: 0; transform: translateX(101%); }
+        aside.open { transform: none; }
+        .scrim {
+          display: block; position: absolute; inset: 0; z-index: 20;
+          background: rgba(8, 7, 13, .55);
+        }
+        .scrim[hidden] { display: none; }
+      }
+
+      /*
+        Below 600px §10 asks for monitor mode: read-only, remote run only. The read-only half
+        needs the server, which is slice 12, so what is here is the chassis — one column,
+        drawers across almost the full width, and a stage that still shows the robot. The
+        authoring controls stay reachable rather than being removed, which is a deliberate
+        difference from §10 and is recorded in the slice notes.
+      */
+      @media (max-width: 599px) {
+        aside { width: 86vw; }
+        header { gap: 7px; padding: 0 8px; }
+      }
 
       .ph {
         display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 28px; flex: none;
@@ -192,6 +239,22 @@
       #g-traces { flex: 1; min-height: 0; }
       .gait canvas { display: block; width: 100%; cursor: crosshair; }
       #g-portrait { height: 100%; cursor: default; }
+
+      /*
+        Below 600px the phase portrait goes, which is the same judgement the slice 10 notes
+        already recorded about it: the panel that looks most impressive and teaches least is
+        the one to cut when room runs out. Its column back gives the footfall diagram and the
+        traces the full width.
+
+        This block sits *after* the `.gait` rules rather than with the other narrow-width CSS
+        above, because both selectors are `.gait.on` and at equal specificity the later rule
+        wins — put up there, it was silently overridden and the strip stayed two columns wide.
+      */
+      @media (max-width: 599px) {
+        #g-portrait { display: none; }
+        .gait.on { grid-template-columns: minmax(0, 1fr); }
+        .gait-time { border-right: 0; }
+      }
       /*
         The two renderers occupy the same box and exactly one is shown. They draw the same
         Snapshot, so switching never reloads or reseeks anything — it is a visibility toggle
@@ -401,6 +464,8 @@
         <button id="view-2d" class="on" title="The teaching view (2)">2D</button>
         <button id="view-3d" title="Orbit around the robot (3)">3D</button>
       </span>
+      <button id="btn-panel-left" class="narrow-only">Controls</button>
+      <button id="btn-panel-right" class="narrow-only">Run data</button>
       <button id="btn-challenges">Challenges</button>
       <button id="btn-stepper">Show me how this works →</button>
       <span class="spacer"></span>
@@ -408,6 +473,7 @@
     </header>
 
     <main>
+      <div class="scrim" id="scrim" hidden></div>
       <aside class="left">
         <div id="challenges" class="ch-panel" hidden></div>
         <div id="guided"></div>

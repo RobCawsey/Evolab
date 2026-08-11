@@ -71,13 +71,18 @@ export function drawFootfall(
   // The window is stated because the number is only comparable to the behaviour map's cell
   // if it was measured over the same trial. It is — `respawn` records exactly `trialSeconds`
   // — and saying so is what lets a reader trust the two agreeing rather than assume it.
-  drawTitle(
-    ctx,
-    `footfall · duty ${duty.toFixed(2)} over ${seconds.toFixed(1)} s ` +
-      `(L ${dutyL.toFixed(2)} · R ${dutyR.toFixed(2)})`,
-    plot.x,
-    plot.y - 1,
-  );
+  //
+  // Shortened rather than clipped on a narrow panel. The per-foot split is the first thing to
+  // go and the window is the last, because the window is what makes the duty figure mean
+  // anything next to the behaviour map; a caption sliced mid-number states neither.
+  const full = `footfall · duty ${duty.toFixed(2)} over ${seconds.toFixed(1)} s ` +
+    `(L ${dutyL.toFixed(2)} · R ${dutyR.toFixed(2)})`;
+  const medium = `footfall · duty ${duty.toFixed(2)} over ${seconds.toFixed(1)} s`;
+  const short = `duty ${duty.toFixed(2)} / ${seconds.toFixed(1)} s`;
+
+  ctx.font = '10px ui-monospace, monospace';
+  const fits = (text: string) => ctx.measureText(text).width <= plot.w;
+  drawTitle(ctx, fits(full) ? full : fits(medium) ? medium : short, plot.x, plot.y - 1);
 
   drawPlayhead(ctx, plot, rec, frame);
 }

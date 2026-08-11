@@ -83,16 +83,20 @@ export function drawTraces(
 
   drawTitle(ctx, 'joint angles · solid left, dashed right', plot.x, plot.y - 1);
 
-  // Legend, inline at the right so it costs no vertical space.
-  const legend: [string, string][] = [
-    ['hip', GAIT_COLOURS.hip], ['knee', GAIT_COLOURS.knee], ['ankle', GAIT_COLOURS.ankle],
-  ];
-  ctx.textAlign = 'right';
-  let lx = plot.x + plot.w;
-  for (const [name, colour] of [...legend].reverse()) {
-    ctx.fillStyle = colour;
-    ctx.fillText(name, lx, plot.y - 1);
-    lx -= ctx.measureText(name).width + 10;
+  // Legend, inline at the right so it costs no vertical space — but only when there is room
+  // for it. On a narrow screen it collided with the title, and two overlapping labels are
+  // worse than one label and a legend the reader can infer from the colours.
+  if (plot.w > 330) {
+    const legend: [string, string][] = [
+      ['hip', GAIT_COLOURS.hip], ['knee', GAIT_COLOURS.knee], ['ankle', GAIT_COLOURS.ankle],
+    ];
+    ctx.textAlign = 'right';
+    let lx = plot.x + plot.w;
+    for (const [name, colour] of [...legend].reverse()) {
+      ctx.fillStyle = colour;
+      ctx.fillText(name, lx, plot.y - 1);
+      lx -= ctx.measureText(name).width + 10;
+    }
   }
 
   drawPlayhead(ctx, plot, rec, frame);
