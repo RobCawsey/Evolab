@@ -23,6 +23,13 @@
         --display: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
       }
       * { box-sizing: border-box; }
+      /*
+        `hidden` means hidden. The browser's own rule for it is the weakest kind of selector,
+        so any `#thing { display: … }` in this file silently beats it — which is how the
+        behaviour map leaked into the guided flow in slice 8 and how the guided panel stayed
+        on screen under the challenge track in slice 11. Twice is a pattern; this ends it.
+      */
+      [hidden] { display: none !important; }
       html, body { height: 100%; margin: 0; }
       body {
         background: var(--bg); color: var(--text); font-family: var(--display);

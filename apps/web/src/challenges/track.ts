@@ -28,11 +28,17 @@ export interface TrackPanel {
 }
 
 export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPanel {
+  // The note sits **above** the list, not below it.
+  //
+  // §7 puts explanations in the right rail; that rail is full, so they live here instead. The
+  // first version appended them under eleven cards, which put the note about 1,300 px down a
+  // scrolling column — clicking a `?` appeared to do nothing at all. Above the list it is
+  // always the thing that just changed.
   host.innerHTML = `
     <div class="ph">Challenges<span class="sp"></span><em id="ch-count">0 of 12 concepts</em></div>
-    <div class="ch-list" id="ch-list"></div>
     <div class="ph" id="ch-note-head" hidden>Explanation<span class="sp"></span><em>what this means</em></div>
-    <div class="ch-note" id="ch-note" hidden></div>`;
+    <div class="ch-note" id="ch-note" hidden></div>
+    <div class="ch-list" id="ch-list"></div>`;
 
   const el = <T extends HTMLElement>(id: string) => host.querySelector<T>(`#${id}`)!;
   const list = el('ch-list');
@@ -117,6 +123,11 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
     noteBox.append(name, text);
     // Dismissal is permanent per concept (§7), so it is only offered once.
     if (!progress.dismissed.includes(conceptId)) noteBox.append(dismiss);
+
+    // Being above the list is not enough on its own: a chip clicked on card 8 is a long way
+    // below the note it opens. Scrolling to it is what makes the `?` feel like it did
+    // something, which is the whole job of a one-affordance explanation layer.
+    noteHead.scrollIntoView({ block: 'nearest' });
   }
 
   return {
