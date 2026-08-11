@@ -130,10 +130,15 @@ limit" when the actual cause was motor gains being 200× too small. The lesson r
 there is worth more than the fix.
 
 Next: slice 9 — the 3D replay. Specified in
-[docs/implementation.md](docs/implementation.md#slice-9--3d-replay), including the decision
-it opens with: **render in 3D but keep simulating in 2D**, because moving to `rapier3d`
-invalidates every fitness number in the project in order to buy a sideways fall the
-eleven-gene sagittal genome has no way to correct.
+[docs/implementation.md](docs/implementation.md#slice-9--3d-replay).
+
+**Slice 9 renders in 3D and keeps simulating in 2D, and that is decided, not deferred.**
+Moving to `rapier3d` invalidates every fitness number in the project and re-pins the golden
+test, in order to buy a sideways fall the eleven-gene sagittal genome has **no way to
+correct** — there is no lateral term in the controller, so evolution could not fix it. The
+cost is that a viewer who orbits to the front can see the robot cannot fall sideways, and
+that must be said out loud in the UI rather than hidden. Revisit only if the genome grows a
+lateral term.
 
 Slice 8 was the natural stopping point. Everything from here changes how the search is
 watched, not how it works.

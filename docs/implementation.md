@@ -1717,27 +1717,34 @@ the 2D view stays exactly as it is. §9 of the design document.
 Everything. The archive is the last slice that changes how the search works; this one only
 changes how it is watched.
 
-### The decision to make first: does the physics move to 3D?
+### Decided: render in 3D, keep simulating in 2D
 
-Two honest options, and the answer is not obvious.
+**Settled before the slice starts, not during it.** This is the one choice here that is
+expensive to reverse, so it is recorded rather than left to whoever opens the file.
 
-**A — render 3D, simulate 2D.** The sagittal simulation stays as it is; the renderer extrudes
-each segment into a box and mirrors the far leg properly instead of nudging it sideways with
-`FAR_LEG_RENDER_OFFSET`. Cheap, keeps every number in the project valid, keeps the golden
-test meaningful, and ships in one session. The robot cannot fall sideways, ever, and a viewer
-who orbits to the front will see that immediately.
+The alternative was real: move to `rapier3d`, give the morphology a third dimension and roll
+joints, and let the biped fall sideways. That is more honest physics. It also invalidates
+every fitness number in the project, re-pins the golden test, and costs a slice and a half
+before anything walks again — all to buy a failure mode the eleven-gene sagittal genome has
+**no way to correct**. The controller has no lateral term, so a robot that can fall sideways
+will simply fall sideways, and evolution cannot fix it because nothing in the genome moves
+in that axis. Spending the largest slice in the project on a strictly worse robot is the
+kind of trade that looks like rigour and is not.
 
-**B — move to `rapier3d`.** The morphology gains a third dimension and roll joints, and the
-biped can now fall sideways — which is realistic and which the eleven-gene sagittal genome
-has no way to correct. Every fitness number in the project is invalidated. The golden test
-has to be re-pinned. It is a slice and a half of work before anything walks again.
+So: the sagittal simulation stays exactly as it is. The renderer extrudes each segment into
+a box and separates the legs properly in z, instead of nudging the far leg sideways with
+`FAR_LEG_RENDER_OFFSET`. Every number in the project stays valid, the golden test stays
+meaningful, and the slice ships without a rewrite underneath it.
 
-**Take A, and say so in the UI.** The teaching claim this project makes is about evolution,
-not about robotics fidelity, and B spends its entire budget buying a failure mode the
-controller cannot address. B is worth revisiting only if the genome grows a lateral term,
-which is slice 14 territory at the earliest. Write the reasoning into §9 as an amendment the
-way slice 7 amended §12 about React, because "why is it flat?" is the first question any
-reader will ask.
+The cost is real and must be **stated in the UI, not hidden**: orbit the camera to the front
+and the robot visibly cannot fall sideways. *"Why is it flat?"* is the first question any
+reader will ask, and an unanswered one teaches them the project is sloppy rather than
+deliberate. Write the reasoning into §9 of the design document as an amendment, the way
+slice 7 amended §12 about React.
+
+Revisit only if the genome grows a lateral term — slice 14 territory at the earliest, and a
+different project's worth of work in the controller before the physics question even
+matters.
 
 ### Design
 
