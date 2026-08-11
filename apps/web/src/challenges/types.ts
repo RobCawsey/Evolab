@@ -105,6 +105,14 @@ export interface ChallengeSetup {
 export interface Challenge {
   readonly id: string;
   readonly title: string;
+  /**
+   * The section of the ladder this card belongs to.
+   *
+   * Cards carry it rather than a separate table listing ids, so there is one ordering to keep
+   * right instead of two that can drift apart. Consecutive cards sharing a phase are drawn
+   * under one subhead.
+   */
+  readonly phase: string;
   /** Concept ids. Every one must have a note in `notes.ts` — asserted by a test. */
   readonly teaches: readonly string[];
   /** One or two sentences, shown before the card is attempted. Never gives the answer away. */

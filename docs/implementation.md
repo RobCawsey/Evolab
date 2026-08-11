@@ -2079,6 +2079,35 @@ The phrasing needed care too — `'{bestDips} times'` prints *"1 times"* on the 
 lesson only just happens. It reads "went down on {bestDips} of the generations you just
 watched" instead.
 
+### The track had to fit without scrolling
+
+Eleven cards in a 236 px column came to 1,193 px against 858 px of space, and the measurement
+said where it had gone: **eleven titles are 299 px and eleven briefs are 601 px.** Two thirds
+of the overflow was explanatory text on cards the reader was not looking at.
+
+A vertical carousel was considered and rejected. It removes the scrollbar by showing one card
+and hiding ten, which is the opposite of what Fig 9.2 is for — the track exists to be visible
+as a curriculum, and *what do I understand now* stops being answerable at a glance. Reaching
+card 9 also becomes eight steps, or a jump list, which is the list that was just removed.
+
+Three changes instead, and the list now ends 238 px clear of the bottom:
+
+- **A collapsed card is its title.** Brief, task and concept chips belong to the open card.
+- **A concept strip**, twelve dots in ladder order, filled as each is understood. It answers
+  §7's question in twenty pixels and stays put while the list moves; clicking one opens its note.
+- **Four phase subheads** — *How the algorithm works*, *What you are asking for*, *Making the
+  search work*, *How to read a gait*. Eleven tasks in a row read as eleven unrelated things;
+  grouped, they read as four ideas, which is what the ladder actually is. Four rather than the
+  three first sketched, because the fitness-design pair is the payload of the whole track and
+  reads badly bolted onto the mechanics.
+
+The open card is scrolled into view when it changes, and **only** when it changes — doing it on
+every repaint yanked the list back each time a run reported a generation.
+
+The column as a whole still scrolls, because the gait sliders sit below the track. That is
+deliberate: card 9 asks the reader to click an archive cell and watch that gait load into those
+sliders, so hiding them would break its payoff.
+
 ### Progress is per concept
 
 §7 and Fig 9.2 note 4: the panel answers *what do I understand now*, not *how much have I

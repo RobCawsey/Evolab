@@ -20,6 +20,7 @@ import type { Challenge } from './types.ts';
 export const CHALLENGES: readonly Challenge[] = [
   {
     id: 'first-population',
+    phase: 'How the algorithm works',
     title: 'Twenty-four robots, none of them designed',
     teaches: ['population'],
     brief:
@@ -49,6 +50,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'selection',
+    phase: 'How the algorithm works',
     title: 'Watch two of three get thrown away',
     teaches: ['selection'],
     brief:
@@ -67,6 +69,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'crossover',
+    phase: 'How the algorithm works',
     title: 'Where does a child come from?',
     teaches: ['crossover'],
     brief: 'Two parents, one child, gene by gene — and the child is not an average of them.',
@@ -82,6 +85,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'naive-objective',
+    phase: 'What you are asking for',
     title: 'Ten metres, any way you can',
     teaches: ['fitness-design'],
     brief:
@@ -110,6 +114,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'guard-rails',
+    phase: 'What you are asking for',
     title: 'Put the guard rails back',
     teaches: ['fitness-design'],
     brief:
@@ -141,6 +146,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'elitism',
+    phase: 'Making the search work',
     title: 'Lose the best one',
     teaches: ['elitism'],
     brief:
@@ -173,6 +179,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'mutation-rate',
+    phase: 'Making the search work',
     title: 'Too little, too much',
     teaches: ['mutation'],
     brief:
@@ -194,6 +201,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'stalled',
+    phase: 'Making the search work',
     title: 'It stopped improving at generation 12',
     teaches: ['diversity', 'local-optima'],
     brief:
@@ -221,6 +229,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'repertoire',
+    phase: 'How to read a gait',
     title: 'Three ways to walk the same distance',
     teaches: ['quality-diversity'],
     brief:
@@ -244,6 +253,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'footfalls',
+    phase: 'How to read a gait',
     title: 'Read the footfalls',
     teaches: ['stance-swing', 'duty-factor'],
     brief:
@@ -276,6 +286,7 @@ export const CHALLENGES: readonly Challenge[] = [
   },
   {
     id: 'cost-of-transport',
+    phase: 'How to read a gait',
     title: 'The fastest gait is not the cheapest',
     teaches: ['cost-of-transport'],
     brief:

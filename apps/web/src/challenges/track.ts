@@ -36,6 +36,7 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
   // always the thing that just changed.
   host.innerHTML = `
     <div class="ph">Challenges<span class="sp"></span><em id="ch-count">0 of 12 concepts</em></div>
+    <div class="ch-dots" id="ch-dots"></div>
     <div class="ph" id="ch-note-head" hidden>Explanation<span class="sp"></span><em>what this means</em></div>
     <div class="ch-note" id="ch-note" hidden></div>
     <div class="ch-list" id="ch-list"></div>`;
@@ -49,7 +50,18 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
   // rebuild eleven DOM subtrees and lose the scroll position.
   const cards = new Map<string, { root: HTMLElement; after: HTMLElement; concepts: HTMLElement }>();
 
+  let previousPhase = '';
   for (const [index, challenge] of CHALLENGES.entries()) {
+    // A subhead whenever the phase changes. Eleven cards in a row read as eleven unrelated
+    // tasks; grouped, they read as four ideas — which is what the ladder in §7 actually is.
+    if (challenge.phase !== previousPhase) {
+      const head = document.createElement('div');
+      head.className = 'ch-phase';
+      head.textContent = challenge.phase;
+      list.append(head);
+      previousPhase = challenge.phase;
+    }
+
     const root = document.createElement('div');
     root.className = 'ch-card';
 
@@ -130,9 +142,37 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
     noteHead.scrollIntoView({ block: 'nearest' });
   }
 
+  /**
+   * The concept strip: one dot per concept, in the order the ladder introduces it.
+   *
+   * §7 says the panel answers *what do I understand now*, and eleven card titles do not
+   * answer that at a glance — they answer *what have I done*. Twelve dots do, in about
+   * twenty pixels, and they stay put while the list scrolls.
+   *
+   * Ordered by first appearance in the cards rather than by `NOTES` order, so the strip is
+   * the ladder rather than an alphabet.
+   */
+  const conceptOrder = [...new Set(CHALLENGES.flatMap((c) => c.teaches))];
+  const dots = new Map<string, HTMLElement>();
+  for (const id of conceptOrder) {
+    const dot = document.createElement('button');
+    dot.className = 'ch-dot';
+    dot.title = noteById(id)?.name ?? id;
+    dot.addEventListener('click', () => showNote(id, lastProgress));
+    el('ch-dots').append(dot);
+    dots.set(id, dot);
+  }
+
+  // `showNote` needs the current record and the dots are wired before `update` first runs.
+  let lastProgress: Progress = { concepts: [], cards: [], dismissed: [] };
+  /** Only scroll when the open card actually changes, not on every repaint. */
+  let scrolledTo: string | null = null;
+
   return {
     update(progress, openId, outcome, done): void {
+      lastProgress = progress;
       el('ch-count').textContent = `${progress.concepts.length} of ${NOTES.length} concepts`;
+      for (const [id, dot] of dots) dot.classList.toggle('known', understands(progress, id));
 
       // The frontier is the first card not yet completed. Everything past it is dimmed as a
       // suggestion of where to go next — and stays clickable, which is the whole point.
@@ -159,6 +199,13 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
         card.after.hidden = !show;
         if (show) card.after.textContent = renderAfterword(challenge.afterword, outcome);
       }
+
+      // Bring the newly opened card into view. Only when it changes: doing it on every
+      // repaint would yank the list back every time a run reported a generation.
+      if (openId !== null && openId !== scrolledTo) {
+        cards.get(openId)?.root.scrollIntoView({ block: 'nearest' });
+      }
+      scrolledTo = openId;
     },
   };
 }
