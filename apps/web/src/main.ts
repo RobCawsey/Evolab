@@ -1,5 +1,5 @@
 /**
- * Slice 6 — "guided first run".
+ * Slice 11 — the challenge track ties the instrument together.
  *
  * A fitness chart climbing beside a live replay of the current champion, with the slice-1
  * sliders still there so a hand-tuned gait and an evolved one can be compared on the same
@@ -38,6 +38,13 @@ import { createStepper } from './ui/stepper.ts';
 import { createGuided } from './ui/guided.ts';
 import { createEditor, decodeSpec, encodeSpec } from './ui/editor.ts';
 import { presetByKey, type Preset } from './run/objectives.ts';
+import { createTrack } from './challenges/track.ts';
+import { evaluateCheck } from './challenges/check.ts';
+import { challengeById } from './challenges/data.ts';
+import {
+  completeCard, dismissNote, loadProgress, saveProgress,
+} from './challenges/progress.ts';
+import type { Challenge, Outcome } from './challenges/types.ts';
 import {
   activeGait, adoptChampion, createRunState, offerChampion, offerFirst, sampleHistory,
   spawnPool, type AppStage,
@@ -116,6 +123,7 @@ const state = createRunState({
     ? (params.get('stage') as AppStage)
     : 'guided',
   view: params.get('view') === '3d' ? '3d' : '2d',
+  challenge: params.get('card'),
 });
 
 /**
@@ -397,6 +405,7 @@ function queueUrl(): void {
     if (state.mode === 'evolved') q.set('mode', 'evolved');
     q.set('stage', state.stage);
     if (state.view === '3d') q.set('view', '3d');
+    if (state.challenge) q.set('card', state.challenge);
     q.set('goal', state.preset.key);
     if (encodeSpec(spec) !== encodeSpec(DEFAULT_SPEC)) q.set('body', encodeSpec(spec));
     history.replaceState(null, '', `?${q.toString()}`);
@@ -515,6 +524,122 @@ function setView(next: '2d' | '3d'): void {
   queueUrl();
 }
 
+/* ---------------- challenge track ---------------- */
+
+/**
+ * §7's concept ladder, wired to the instrument the last ten slices built.
+ *
+ * The track configures a run and reads its outcome. **It never simulates** — same rule as the
+ * gait panels, same reason — and it never touches the body, because a card that changed the
+ * morphology would quietly make its own run incomparable with every other number on screen.
+ */
+let progress = loadProgress();
+let runFinished = false;
+
+/**
+ * The numbers a card can test against or quote back.
+ *
+ * Built from state rather than scraped from the DOM: a check that read the panels would break
+ * the first time one moved, and would silently start passing or failing for the wrong reason.
+ */
+function currentOutcome(): Outcome {
+  const pool = state.pool;
+  const result = state.champion?.summary.bestResult ?? null;
+  const archive = pool?.archive ?? null;
+  const last = state.history[state.history.length - 1];
+  return {
+    championDistance: result?.distance ?? 0,
+    championFitness: state.champion?.fitness ?? 0,
+    championUpright: result?.uprightTime ?? 0,
+    championEffort: result?.effort ?? 0,
+    championStride: result?.strideLength ?? 0,
+    championDuty: result?.dutyFactor ?? 0,
+    championFell: result?.fell ? 1 : 0,
+    firstDistance: state.firstChampion?.summary.bestResult?.distance ?? 0,
+    firstFitness: state.firstChampion?.fitness ?? 0,
+    generations: pool && Number.isFinite(pool.generation) ? pool.generation : 0,
+    diversity: last?.diversity ?? 0,
+    // Counted from the chart's own series, so the number quoted in a card is the number the
+    // learner can see. Elitism makes this exactly zero; without it, it is the lesson.
+    bestDips: state.history.reduce(
+      (n, point, i) => (i > 0 && point.best < state.history[i - 1]!.best - 1e-9 ? n + 1 : n),
+      0,
+    ),
+    coverage: archive ? archive.filled / archive.cells.length : 0,
+    archiveCells: archive?.filled ?? 0,
+    trialSeconds: state.trialSeconds,
+    population: state.population,
+  };
+}
+
+const track = createTrack(el('challenges'), {
+  onOpen: (challenge) => openChallenge(challenge),
+  onDismissNote: (conceptId) => {
+    progress = dismissNote(progress, conceptId);
+    saveProgress(progress);
+    paintTrack();
+  },
+});
+
+function paintTrack(): void {
+  track.update(progress, state.challenge, runFinished ? currentOutcome() : null, runFinished);
+}
+
+/**
+ * Apply a card's setup and start its run.
+ *
+ * Deliberately restarts the pool. A card that changes the objective or the GA knobs cannot
+ * reuse a population scored under the previous ones — every fitness in it would be measured
+ * against a different question.
+ */
+function openChallenge(challenge: Challenge): void {
+  const setup = challenge.setup;
+  state.challenge = challenge.id;
+  runFinished = false;
+
+  if (setup.stage) setStage(setup.stage);
+  if (setup.goal) state.preset = presetByKey(setup.goal);
+  if (setup.gens !== undefined) state.target = setup.gens;
+  if (setup.seed !== undefined) state.seed = setup.seed;
+  state.gaOverrides = setup.config ?? {};
+
+  stepper.retarget(morph);
+  startPool();
+  setMode('manual');
+
+  // The focus is a hint about where to look, not a mode. Everything stays reachable.
+  if (setup.focus === '3d') setView('3d');
+  else if (setup.focus === 'stepper') stepper.open();
+
+  paintTrack();
+  queueUrl();
+}
+
+/**
+ * Check the open card when a run ends, and record what it taught.
+ *
+ * Progress is **per concept, not per card** — the panel answers "what do I understand now".
+ * Two cards teaching `fitness-design` mark one concept between them.
+ */
+function settleChallenge(): void {
+  runFinished = true;
+  const challenge = challengeById(state.challenge);
+  if (challenge && evaluateCheck(challenge.success, currentOutcome())) {
+    progress = completeCard(progress, challenge.id, challenge.teaches);
+    saveProgress(progress);
+  }
+  paintTrack();
+}
+
+el('btn-challenges').addEventListener('click', () => {
+  const panel = el('challenges');
+  panel.hidden = !panel.hidden;
+  el('btn-challenges').classList.toggle('on', !panel.hidden);
+  // The guided flow and the track both want the left column; showing both is a mess.
+  el('guided').hidden = !panel.hidden ? true : state.stage !== 'guided';
+  if (!panel.hidden) paintTrack();
+});
+
 /* ---------------- frame ---------------- */
 
 function fit(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dpr: number): void {
@@ -550,6 +675,7 @@ function frame(now: number): void {
       state.running = false;
       state.pool.pause();
       el('btn-run').textContent = 'Run';
+      settleChallenge();
     }
   }
 

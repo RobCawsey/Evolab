@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 10</title>
+    <title>Evolab — slice 11</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -90,6 +90,50 @@
         width: 11px; height: 11px; border-radius: 50%; background: var(--text); cursor: pointer; border: none;
       }
       aside.left.locked input[type="range"] { pointer-events: none; opacity: .55; }
+
+      /*
+        The challenge track — Fig 9.2. Nothing here is locked: .ahead dims a card as a
+        suggestion about order and leaves it clickable, because §7 decided a reader who
+        already knows the material starts wherever they like.
+      */
+      .ch-panel { margin: -10px -12px 14px; }
+      .ch-list { display: flex; flex-direction: column; }
+      .ch-card {
+        border-bottom: 1px solid var(--line); padding: 9px 12px 11px;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .ch-card.ahead { opacity: .45; }
+      .ch-card.open { background: var(--panel2); }
+      .ch-head {
+        display: grid; grid-template-columns: 18px 1fr 14px; align-items: center; gap: 8px;
+        background: none; border: 0; padding: 0; text-align: left; cursor: pointer;
+        color: var(--text); font-size: 12.5px; line-height: 1.3;
+      }
+      .ch-head:hover .ch-t { color: var(--amber); }
+      .ch-n {
+        font-family: var(--mono); font-size: 10px; color: var(--faint);
+        border: 1px solid var(--line); border-radius: 2px; text-align: center; line-height: 15px;
+      }
+      .ch-card.done .ch-n { color: var(--ok); border-color: #2b4c40; }
+      .ch-tick { color: var(--ok); font-size: 11px; visibility: hidden; }
+      .ch-card.done .ch-tick { visibility: visible; }
+      .ch-brief { margin: 0; font-size: 11.5px; color: var(--dim); line-height: 1.45; }
+      .ch-task { margin: 0; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+      .ch-card:not(.open) .ch-task, .ch-card:not(.open) .ch-concepts { display: none; }
+      .ch-concepts { display: flex; flex-wrap: wrap; gap: 5px; }
+      .ch-chip {
+        font-size: 10.5px; padding: 2px 7px; border-radius: 10px; cursor: pointer;
+        border: 1px solid var(--line); background: transparent; color: var(--dim);
+      }
+      .ch-chip::after { content: " ?"; color: var(--faint); }
+      .ch-chip.known { color: var(--ok); border-color: #2b4c40; }
+      .ch-after {
+        margin: 2px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text);
+        border-left: 2px solid var(--amber); padding: 4px 0 4px 9px;
+      }
+      .ch-note { padding: 9px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
+      .ch-note b { font-size: 12px; font-weight: 600; }
+      .ch-note p { margin: 0; font-size: 11.5px; color: var(--dim); line-height: 1.5; }
 
       /* stage */
       .stage-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -327,6 +371,7 @@
         <button id="view-2d" class="on" title="The teaching view (2)">2D</button>
         <button id="view-3d" title="Orbit around the robot (3)">3D</button>
       </span>
+      <button id="btn-challenges">Challenges</button>
       <button id="btn-stepper">Show me how this works →</button>
       <span class="spacer"></span>
       <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode &nbsp;·&nbsp; 2/3 — view &nbsp;·&nbsp; S — stepper</span>
@@ -334,6 +379,7 @@
 
     <main>
       <aside class="left">
+        <div id="challenges" class="ch-panel" hidden></div>
         <div id="guided"></div>
         <div id="sliders"></div>
         <div id="editor" class="lab-only"></div>

@@ -2,8 +2,8 @@
  * Everything the page knows about the current search, in one plain object.
  *
  * As of slice 4 the search itself lives in workers; this holds the aggregated view of it.
- * No state library — Zustand arrives around slice 6, when several panels need to share
- * state and prop-drilling starts to hurt.
+ * No state library, and that is settled rather than pending — §12 of the design document
+ * records why Zustand went the same way React did. Panels take the state they read.
  */
 
 import {
@@ -13,6 +13,7 @@ import {
   type GaitParams,
   type GenerationSummary,
   type Genome,
+  type IslandConfig,
   type Morphology,
 } from '@evolab/evolution';
 import { IslandPool, defaultWorkerCount, type PoolEvents } from '../workers/pool.ts';
@@ -53,6 +54,18 @@ export interface RunState {
   /** guided / explorer / lab. Freely switchable, nothing locked — section 7. */
   stage: AppStage;
   view: ReplayView;
+  /**
+   * GA knobs a challenge card can override — slice 11.
+   *
+   * Kept as a partial rather than as fields with defaults, so "the card said nothing about
+   * elitism" and "the card asked for the usual two elites" stay distinguishable. Only the
+   * keys `spawnPool` threads through are honoured, and that is deliberately a short list:
+   * a card that could set `size` or `trialSeconds` could silently make its own run
+   * incomparable with every other one on screen.
+   */
+  gaOverrides: Pick<Partial<IslandConfig>, 'elites' | 'mutationRate' | 'tournamentSize'>;
+  /** Which challenge card is open, so a reload lands back on it. */
+  challenge: string | null;
   preset: Preset;
   /**
    * Best of generation 0, kept for the before-and-after in guided step 4.
@@ -77,6 +90,8 @@ export interface RunOptions {
   mode?: Mode;
   stage?: AppStage;
   view?: ReplayView;
+  gaOverrides?: RunState['gaOverrides'];
+  challenge?: string | null;
   preset?: Preset;
 }
 
@@ -94,6 +109,8 @@ export function createRunState(opts: RunOptions = {}): RunState {
     mode: opts.mode ?? 'manual',
     stage: opts.stage ?? 'guided',
     view: opts.view ?? '2d',
+    gaOverrides: opts.gaOverrides ?? {},
+    challenge: opts.challenge ?? null,
     preset: opts.preset ?? DEFAULT_PRESET,
     firstChampion: null,
     manualGait: opts.manualGait ?? defaultGait(),
@@ -124,6 +141,9 @@ export function spawnPool(
         size: state.population,
         trialSeconds: state.trialSeconds,
         objective: state.preset.objective,
+        // Spread last so a challenge card wins, and omitted keys fall through to
+        // DEFAULT_CONFIG rather than to an explicit undefined.
+        ...state.gaOverrides,
       },
     },
     events,

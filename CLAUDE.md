@@ -18,6 +18,25 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 11 — "Challenge track".** Eleven cards in the left column, each naming the concept it
+teaches, each configuring the app in one click. Nothing is locked — cards past the frontier
+are dimmed as guidance and stay clickable, and a completed card is never dimmed.
+
+**Afterwords are data that branches on the outcome.** Slice 6 established the rule; this slice
+had to encode it, because challenges are data and cannot hold functions. Three tests guard it:
+every placeholder names a real field, every branch renders clean, and the naive-objective
+card's walking branch is asserted *not* to mention falling. It earned its keep immediately —
+the first live run of that card walked 6.1 m instead of diving.
+
+**Card 6 caught the same bug in my own copy.** It said "The line dips" unconditionally; with
+four islands that is likely, not certain. `Outcome` gained `bestDips`, counted from the
+chart's own series, and the card now branches. Measured five dips, largest 0.512 — which also
+verifies the new `gaOverrides` plumbing reaches the workers.
+
+**Progress is per concept, not per card**, in `localStorage` — the first state in this project
+that cannot live in the URL. The parse is defensive because that key is user-writable and
+outlives the code reading it: junk degrades to empty rather than throwing on boot.
+
 **Slice 10 — "Gait analysis".** A strip under the stage — footfall diagram, six joint-angle
 traces, hip phase portrait — present only when there is a recording to draw. In manual mode
 the replay is live and there is nothing to scrub, so the panels are absent rather than blank.
@@ -176,18 +195,17 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 11 — the challenge track, now written out in full in
-[docs/implementation.md](docs/implementation.md#slice-11--challenge-track).
+Next: slice 12 — the server. Sketched in
+[docs/implementation.md](docs/implementation.md#slices-1214--later-stages); write it out first.
 
-**Three of §7's fifteen concepts are out of reach and the spec says which.** Multi-objective
+**Three of §7's fifteen concepts are out of reach and the code says why.** Multi-objective
 needs a Pareto front that is not built; stability margin needs slice 14's terrain; and
 **symmetry is impossible by construction** — `gaitTargets` reads `params[joint.kind]`, so both
 legs share one amplitude, phase and centre and this robot cannot limp. That is the price of
 the eleven-gene transferable genome, and it is worth paying.
 
-It is the first slice since 6 that adds **teaching** rather than instrumentation. Everything
-needed to show a learner what went wrong now exists: the stepper shows the operators, the
-archive shows what else was found, and the gait panels show how the winner actually moved.
+Slice 11 was the first slice since 6 that added **teaching** rather than instrumentation, and
+the curriculum is now the thing that ties the instrument together.
 
 Slice 8 was the natural stopping point. Everything from here changes how the search is
 watched, not how it works.
@@ -259,7 +277,7 @@ npm run check        # typecheck everything
 npm run sim          # headless: step the biped in Node, print positions
 ```
 
-`npm test` is 174 tests in about 1.5 s, so there is no excuse for not running it. It covers
+`npm test` is 211 tests in about 1.5 s, so there is no excuse for not running it. It covers
 the RNG (including a pinned golden vector), the controller, the morphology, the archive, the
 trajectory recording, and the physics — the last of these builds real Rapier worlds and is
 still fast enough to sit in the inner loop. It also covers `render/three/bodies.ts` under
