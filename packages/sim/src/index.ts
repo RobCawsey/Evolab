@@ -14,5 +14,3 @@ export {
   createRecorder, snapshotAt, contactAt, dutyFromRecording, dutyPerFoot, timeAt, RECORD_HZ,
 } from './record.ts';
 export type { Recording, Recorder } from './record.ts';
-export { buildTerrain, groundHeightAt, maxSlope, FLAT, SAMPLE_SPACING } from './terrain.ts';
-export type { Terrain, TerrainSpec } from './terrain.ts';

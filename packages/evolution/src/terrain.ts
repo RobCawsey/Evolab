@@ -7,10 +7,14 @@
  * needs ramps, steps and rough ground, so all three become relative to the ground beneath the
  * robot — and this module is where that ground is defined.
  *
- * **Pure, and it imports nothing from Rapier.** A `TerrainSpec` becomes a `Float32Array` of
- * heights by arithmetic alone, so every profile can be checked in Node without a physics world,
- * the same way `render/three/bodies.ts` is checked without a WebGL context. If that stops being
- * true, terrain has stopped being separable from the simulator.
+ * **In this package rather than in `packages/sim`, and that is load-bearing.** A `TerrainSpec`
+ * becomes a `Float32Array` of heights by arithmetic alone — no Rapier, no I/O — which is
+ * exactly invariant 3, and it is the same precedent `buildBiped` sets: a pure description of a
+ * physical thing belongs with the search, and the simulator consumes it. It has to be here for
+ * `tasks.ts` to name a terrain without importing the simulator, which invariant 3 forbids.
+ *
+ * If this file ever needs Rapier, terrain has stopped being separable and the task suite has a
+ * problem much larger than a file move.
  *
  * **One array, two consumers.** The heights that build the collider and the heights that answer
  * `groundHeightAt` are the same buffer. If they ever disagree the robot floats or sinks and

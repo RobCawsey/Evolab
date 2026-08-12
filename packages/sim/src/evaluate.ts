@@ -16,11 +16,11 @@ import {
   type GaitParams,
   type Genome,
   type Morphology,
+  type TerrainSpec,
   type TrialResult,
 } from '@evolab/evolution';
 import { CONTROL_EVERY } from './control.ts';
 import { RECORD_HZ, createRecorder, type Recorder, type Recording } from './record.ts';
-import type { TerrainSpec } from './terrain.ts';
 import { Sim, TIMESTEP } from './world.ts';
 
 export interface TrialOptions {

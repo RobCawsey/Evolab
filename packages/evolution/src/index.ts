@@ -72,3 +72,9 @@ export type {
   Island, IslandConfig, Individual, GenerationSummary, Evaluator,
   Stage, GenerationOptions, TournamentTrace, CrossoverTrace,
 } from './island.ts';
+export { buildTerrain, groundHeightAt, maxSlope, FLAT, SAMPLE_SPACING } from './terrain.ts';
+export type { Terrain, TerrainSpec } from './terrain.ts';
+export {
+  TASKS, TASK_SEEDS, METRICS, METRIC_UNITS, badgeOf, scoreTask, buildScorecard, taskMorphology,
+} from './tasks.ts';
+export type { Task, MetricKey, Badge, TaskScore, Scorecard } from './tasks.ts';

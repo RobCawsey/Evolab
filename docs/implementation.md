@@ -2760,6 +2760,69 @@ Flat ground is therefore built exactly as it always was, as an early return abov
 switch, with the reason written next to it. The lesson generalises past this project: *when a
 golden number exists, "geometrically identical" is not a safe refactor of physics setup.*
 
+### Session two: six tasks, calibrated, and `npm run tasks`
+
+`packages/evolution/tasks.ts` holds the suite as data and the scorecard as arithmetic; nothing
+in it simulates anything. `npm run tasks` is the counterpart to `npm run evolve` — that one
+prints what the search found, this one prints what it is worth.
+
+**`terrain.ts` moved from `packages/sim` to `packages/evolution`.** `tasks.ts` has to name a
+terrain, and invariant 3 forbids the search importing the simulator. Terrain is pure arithmetic
+with no Rapier, so it belongs on the evolution side by the same precedent `buildBiped` sets: a
+pure description of a physical thing lives with the search, and the simulator consumes it.
+
+#### Thresholds, calibrated against five gaits
+
+Slice 8's lesson, applied on purpose this time. `npm run tasks -- --calibrate` runs the suite
+against five gaits evolved from different seeds and prints the medians; the thresholds come from
+that distribution — bronze near the median gait, gold near the best.
+
+```
+task       unit           g0       g1       g2       g3       g4     median
+Sprint     m/s          1.72     0.21     0.38     1.06     0.38       0.38
+Endurance  rad/m       -6.53  -118.37   -13.35   -11.37   -19.50     -13.35
+Incline    m            5.18    -0.16     0.70    -0.09     0.37       0.37
+Steps      m            2.57     0.61     1.47     1.32     1.53       1.47
+Shove      m            5.68     0.04    -0.15     1.32    -0.81       0.04
+Payload    m            4.51     1.80     1.25     0.61     1.15       1.25
+```
+
+**Two tasks were re-tuned by this table, not by taste.** Incline started at §6's steeper end and
+four of five gaits went nowhere; at 2° the median is 0.37 m and the spread is real. Shove started
+at −40 N·s with the same problem and now uses −25.
+
+#### Falling caps a badge at bronze
+
+The rule earned itself inside a minute. The reference champion covers 2.37 m on Steps before
+going down, which cleared gold, and the first scorecard printed **`5/5 fell` and `GOLD` on the
+same line**. A distance reached by toppling forwards is a real distance and worth some credit,
+but it is not a gait that clears the steps — §6 says so itself: *"a gait that clears the steps
+once in five is a gait that does not clear the steps."*
+
+A majority rather than all five, so one unlucky seed does not erase a badge and three do.
+
+#### The champion, tested
+
+```
+task        median    spread            fell   badge
+Sprint       1.49 m/s        1.46–1.49    0/5   SILVER
+Endurance  -7.22 rad/m      -7.24–-7.20    0/5   GOLD
+Incline        5.15 m        5.15–5.21    0/5   GOLD
+Steps          2.37 m        2.24–2.40    5/5   BRONZE
+Shove          4.90 m        4.88–4.95    0/5   GOLD
+Payload        5.69 m        5.66–5.75    0/5   GOLD
+overall    6/6 passed                         BRONZE
+
+6 tasks × 5 seeds in 0.60 s
+```
+
+**The gait that scores 6.4598 on flat ground is a bronze robot once it is tested**, and it is
+Steps that says so — the one task where it falls every time. That single line is the thesis of
+§6 delivered without a word of explanation, which is what the suite was for.
+
+Sprint missing gold by 0.01 m/s is a coincidence and a good advertisement for the composite
+rule: the overall badge is the worst task, so nothing is bought with speed.
+
 ### Five seeds, a median, and a spread — and a budget
 
 §6: *"a gait that clears the steps once in five is a gait that does not clear the steps."* Fixed,

@@ -4,15 +4,17 @@
  */
 
 import RAPIER from '@dimforge/rapier2d-compat';
-import type { ControlState, Morphology, Rng } from '@evolab/evolution';
 import {
   buildTerrain,
   FLAT,
   groundHeightAt,
   SAMPLE_SPACING,
+  type ControlState,
+  type Morphology,
+  type Rng,
   type Terrain,
   type TerrainSpec,
-} from './terrain.ts';
+} from '@evolab/evolution';
 
 /** Physics runs at a fixed timestep. Never step by frame delta. */
 export const TIMESTEP = 1 / 240;
