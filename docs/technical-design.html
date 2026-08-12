@@ -1250,8 +1250,10 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     <tbody>
       <tr><td>≥ 1280 px</td><td>Rail + 3 columns + transport</td><td>Full local pool</td><td>Full authoring</td></tr>
       <tr><td>900–1279 px</td><td>Side panels become overlay drawers</td><td>Full local pool</td><td>Full authoring</td></tr>
-      <tr><td>600–899 px</td><td>Stage + bottom sheet, tabbed analysis</td><td>Pool capped at 4 workers</td><td>Inspect &amp; tune only</td></tr>
-      <tr><td>&lt; 600 px</td><td>Single column, monitor mode</td><td>Remote run only</td><td>Read-only</td></tr>
+      <tr><td>600–899 px</td><td>Stage + bottom sheet, tabbed analysis</td><td>Pool capped at 4 workers</td><td>Inspect &amp; tune only
+        &nbsp;<span class="tag t-no">superseded</span></td></tr>
+      <tr><td>&lt; 600 px</td><td>Single column, monitor mode</td><td>Remote run only</td><td>Read-only
+        &nbsp;<span class="tag t-no">superseded</span></td></tr>
     </tbody>
   </table></div>
   <figure style="margin-top:26px">
@@ -1269,6 +1271,37 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     cut-down editor. It gets push-quality live run state, the scorecard and replay — and does not
     pretend to offer morphology authoring on a 390 px canvas.</div>
   </div>
+
+  <div class="amend" style="margin-top:26px"><span class="lbl">Amended — slices 11 and 12</span>
+  <p><strong>Monitor mode is a finished run, replayed read-only — not a live subscription.</strong>
+  Fig 10.1 has the phone subscribing to a run continuing on the desktop session or the server. §5
+  removed the mechanism when it removed the cloud islands: <em>"No SignalR. It was there to stream
+  generations from cloud islands. There are no cloud islands."</em> The two sections were written at
+  different times and the later one deleted what the earlier one assumed. Settled in favour of §5,
+  because the thing §5 cut is the thing that made a live view make sense.</p>
+  <p>What slice 12 built instead is <span class="mono">?shared=&lt;token&gt;</span>: a saved run with
+  its chart and its scorecard, opened with no account and no history. A gait evolved on a desktop,
+  watched on a phone. Genuinely useful, and genuinely not live. If a live view is ever wanted,
+  polling <span class="mono">GET /api/runs/{id}</span> costs one <span class="mono">setInterval</span>
+  and no new dependency — SignalR should not come back by default.</p>
+  <p><strong>Evolution never becomes remote, and editing never becomes read-only.</strong> The pool
+  runs in the browser at every width including a 390 px phone, because that is the decision the whole
+  v2.0 architecture rests on (§2); there is no <em>remote run</em> to fall back to. The authoring
+  controls stay reachable at every size too — the panels become overlay drawers rather than
+  disappearing, so <em>inspect &amp; tune only</em> would now mean deliberately hiding a control that
+  is already on screen and already works. The worker cap is the one rule of the two that survives
+  intact, and it is a <em>touch-device</em> rule rather than a breakpoint one:
+  <span class="mono">min(hardwareConcurrency − 1, 4)</span> applies to a tablet at 1400 px as well.
+  The battery opt-in is not built.</p>
+  <p><strong>The chassis degrades at one breakpoint, not three.</strong> Below 1000 px the side
+  panels stop taking grid space and become overlay drawers the stage runs under, reached from two
+  toolbar buttons; below 600 px the phase portrait goes so the footfall diagram and the joint traces
+  get the full width. No bottom sheet, no tabbed analysis. The arithmetic that forced it is simply
+  that the two fixed columns are 576 px between them, so at 640 px the stage had been getting 64 px —
+  and once the panels could overlay, the middle band had nothing left to do.</p>
+  <p>What survives is the section's thesis, which is why this is an amendment and not a rewrite:
+  <em>degrade the chassis, keep the instrument</em>. Every panel is the same DOM with the same ids at
+  every width. Only its positioning changes.</p></div>
 </section>
 
 <section id="data">

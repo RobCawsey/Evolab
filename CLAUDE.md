@@ -231,9 +231,11 @@ It is the smallest slice left and most of it exists: `archiveMerge` already fold
 maps into one, and the only new part is that the maps arrive over HTTP rather than over
 `postMessage`. Slice 12 already stores every filled cell of every saved run.
 
-**§10 still wants its amendment.** Monitor mode is *view a finished run, read-only* — what
-`?shared=<token>` now does — and not the live subscription Fig 10.1 describes, because §5
-deleted SignalR along with the cloud islands.
+**§10 is amended, and it was wrong in every column of its bottom two rows.** Monitor mode is
+*view a finished run, read-only* — what `?shared=<token>` does, at any width — not the live
+subscription Fig 10.1 describes, because §5 deleted SignalR along with the cloud islands.
+Evolution never becomes remote; editing never becomes read-only. The only rule that survived is
+the touch-device worker cap, and that one is not a breakpoint rule.
 
 Slice 8 was the natural stopping point. Everything from here changes how the search is
 watched, not how it works.
@@ -260,8 +262,8 @@ not to use React. If a dependency is added, that table is the thing to update.
 taking grid space and become overlay drawers the stage runs under, reached from two toolbar
 buttons; below 600 px the phase portrait goes so the footfall diagram and traces get the full
 width. The two fixed columns are 576 px between them, so at 640 px the stage had been getting
-64 px. **§10 also asks for read-only monitor mode below 600 px and that half is not built** —
-it needs the server.
+64 px. §10 asked for three bands; once the panels could overlay, the middle one had nothing left
+to do, and the section now says so.
 
 The toolbar collapses into a ⋯ menu rather than clipping, and the controls are **moved, not
 cloned**, because every one is wired by id in `main.ts`.

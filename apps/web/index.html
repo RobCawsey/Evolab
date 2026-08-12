@@ -124,11 +124,13 @@
       }
 
       /*
-        Below 600px §10 asks for monitor mode: read-only, remote run only. The read-only half
-        needs the server, which is slice 12, so what is here is the chassis — one column,
-        drawers across almost the full width, and a stage that still shows the robot. The
-        authoring controls stay reachable rather than being removed, which is a deliberate
-        difference from §10 and is recorded in the slice notes.
+        Below 600px §10 asked for monitor mode: read-only, remote run only. Neither half was
+        built and §10 is now amended to say so. Monitor mode is `?shared=<token>` — a finished
+        run replayed read-only, at any width — and evolution never becomes remote, because
+        there are no cloud islands to run it on (§5).
+
+        So what is here is only the chassis: one column, drawers across almost the full width,
+        and a stage that still shows the robot. The authoring controls stay reachable.
       */
       @media (max-width: 599px) {
         aside { width: 86vw; }

@@ -2303,7 +2303,18 @@ A finished run, replayed read-only, with no account and no history. Verified end
 a run, published it, opened the link, watched the gait.
 
 Not live. §5 deleted SignalR along with the cloud islands, so a phone cannot subscribe to a
-desktop session — the spec settles that in favour of §5 and **§10 still wants the amendment**.
+desktop session. **§10 is now amended** — the fourth such block in the design document — and it
+settles three things rather than one, because writing it out showed the row was wrong in every
+column: monitor mode is a finished run replayed read-only *at any width*; evolution never becomes
+remote, since there is nothing remote to run it on; and editing never becomes read-only, because
+once the panels overlay rather than disappear, *inspect & tune only* would mean hiding a control
+that is already on screen and already works.
+
+Two of the four breakpoints are tagged `superseded` in place rather than rewritten, on the same
+principle as §4's `hypothetical` rows: the derivation is still worth reading even when the
+conclusion has moved. The one rule that survived intact is the touch-device worker cap, which
+`defaultWorkerCount()` implements exactly as specified — and which is not a breakpoint rule at
+all, since it applies to a tablet at 1400 px too.
 
 ### Measured
 
