@@ -2260,7 +2260,82 @@ That is not caution, it is the product: the browser is where evolution happens, 
 personal project whose teaching tool goes down because a VPS did is a worse project.
 
 Practically this means one module, `apps/web/src/net/api.ts`, which every server call goes
-through, and whose every function returns a result rather than throwing.
+through, and whose every function returns an `ApiResult<T>` rather than throwing — see
+*Errors are data the client reports* below for the contract on both sides of the wire.
+
+### Errors are data the client reports, never control flow
+
+Every failure crosses the wire as a body the client can read, and **`api.ts` never throws**.
+The two halves are separate problems and the rules differ.
+
+#### The server: RFC 9457 `ProblemDetails`, not a bespoke envelope
+
+ASP.NET Core already has the response DTO for this, `AddProblemDetails()` fills it in, and it
+is the standard rather than an invention:
+
+```jsonc
+{
+  "type":     "https://evolab/errors/run-not-found",
+  "title":    "That run does not exist",
+  "status":   404,
+  "traceId":  "00-8f3c…-01",
+  "code":     "run_not_found"      // extension: short, stable, machine-readable
+}
+```
+
+`code` is the one addition — a `type` URI is the standard place for a machine-readable value
+and a short string is easier to switch on in a personal project. It is stable; `title` is copy
+and may be reworded, exactly as goal weights are denormalised for the same reason.
+
+**HTTP status codes stay honest.** A 404 is a 404. It is tempting to return 200 with
+`{ ok: false }` so the client has one shape, but that lies to every cache, proxy, retry policy
+and devtools panel between here and the browser, and it buys nothing the client cannot do for
+itself in one function. The uniform shape is the *client's* job.
+
+**Nothing internal crosses the wire.** No exception messages, no stack traces, no SQL, no file
+paths — `ProblemDetails` in production carries `title`, `status`, `code` and `traceId`, and the
+detail stays in the server log where `traceId` finds it. A share endpoint is anonymous and
+public, so this is not only tidiness.
+
+#### The client: one result type, and no path where a failure matters
+
+```ts
+export type ApiResult<T> =
+  | { readonly ok: true;  readonly data: T }
+  | { readonly ok: false; readonly error: ApiError };
+
+export interface ApiError {
+  readonly code: string;      // from the server, or 'offline' | 'timeout' | 'malformed'
+  readonly message: string;   // safe to show a human
+  readonly status: number;    // 0 when the request never arrived
+  readonly traceId?: string;  // pairs a browser report with a server log line
+}
+```
+
+Four rules, and the first is the one the whole slice turns on:
+
+- **`api.ts` never throws.** A rejected `fetch`, a timeout, a non-2xx, a 200 with unparseable
+  JSON — all four become `{ ok: false, error }`. There is no `try`/`catch` anywhere else in
+  the app, because there is nothing to catch.
+- **Every request has a timeout**, via `AbortController`. A hanging request is worse than a
+  failed one: it produces no error to report and no result to use, so nothing ever resolves.
+  Five seconds; a run upload is 40 kB.
+- **Nothing on the critical path awaits it.** Evolving, replaying, scrubbing and the challenge
+  track never wait for a response. An upload is fire-and-report.
+- **Failures are recorded, not raised.** A small ring of the last few `ApiError`s, and one
+  quiet indicator in the toolbar that appears only when it is non-empty. No dialog, no toast,
+  no red banner over the stage — the app is working, and it should look like it is.
+
+`normaliseError(status, body)` — turning a status and an unknown body into an `ApiError` — is
+a pure function and gets tested in Node like everything else that matters: a well-formed
+`ProblemDetails`, an HTML error page from a proxy, an empty body, a 200 with broken JSON.
+
+#### Where the user sees it
+
+The toolbar already collapses into an overflow menu, so the indicator is a small dot next to
+it, hidden while the ring is empty. Clicking shows the last few — code, message, `traceId`,
+and when. That is the whole reporting surface, and it is deliberately somewhere a learner
+never has to look.
 
 ### Settle first: §5 and §10 disagree about monitor mode
 
@@ -2437,8 +2512,12 @@ into `wwwroot/`. That copy step is the only place the two builds touch.
       creates no second file.
 - [ ] Publishing mints a token; the shared URL replays read-only in a browser with no history,
       no `localStorage`, and no account.
-- [ ] Killing the server leaves the app fully usable, with no error dialog and no console
-      noise beyond one line.
+- [ ] Killing the server leaves the app fully usable: no dialog, no unhandled rejection, no
+      `try`/`catch` outside `api.ts`, and the failure visible only as the toolbar indicator.
+- [ ] Every failure mode produces an `ApiError` rather than an exception — server down,
+      timeout, 404, 500, HTML error page from a proxy, and a 200 with unparseable JSON. The
+      last two are the ones that get skipped; a test covers all six.
+- [ ] No exception message, stack trace or file path appears in any response body.
 - [ ] Every endpoint has a test that runs against fakes — no SQLite file, no disk, no
       fixture teardown. That is what the two repository interfaces are for.
 - [ ] The golden number is still 6.4598. Nothing here touches the search.

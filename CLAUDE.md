@@ -203,6 +203,12 @@ there is worth more than the fix.
 Next: slice 12 — the server, now written out in full in
 [docs/implementation.md](docs/implementation.md#slice-12--the-server).
 
+**Errors are data, never control flow.** The server sends RFC 9457 `ProblemDetails` with a
+stable `code` extension and real HTTP status codes; `api.ts` turns every failure — offline,
+timeout, non-2xx, unparseable 200 — into an `ApiResult<T>` and **never throws**, so there is
+no `try`/`catch` anywhere else in the app. Failures are recorded to a small ring and surfaced
+as one quiet toolbar indicator, not a dialog.
+
 **The rule that slice turns on: the app must work with no server at all** — not degrade,
 work exactly as today. Every call is an enhancement, every failure is silent, `npm run dev`
 and `npm test` keep working with .NET not installed.
