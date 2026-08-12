@@ -38,6 +38,8 @@ import type { ThreeView } from './render/three/scene.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createToolbar } from './ui/toolbar.ts';
+import { createHelp } from './ui/help/panel.ts';
+import { LISTED_SHORTCUTS, shortcutFor } from './ui/keymap.ts';
 import { createGuided } from './ui/guided.ts';
 import { createEditor, decodeSpec, encodeSpec } from './ui/editor.ts';
 import { presetByKey, type Preset } from './run/objectives.ts';
@@ -190,6 +192,9 @@ const toolbar = createToolbar(
     { id: 'btn-panel-right', priority: 9 },
     { id: 'btn-challenges', priority: 6 },
     { id: 'btn-stepper', priority: 2 },
+    // Help gives way earliest of all: it is reachable from the ⋯ menu and from `?`, so it is
+    // the one control that loses nothing by being collapsed.
+    { id: 'btn-help', priority: 0 },
   ],
 );
 
@@ -500,16 +505,44 @@ const guided = createGuided(el('guided'), {
   onExplorer: () => setStage('explorer'),
 });
 
+const help = createHelp(document.body);
+el('btn-help').addEventListener('click', () => help.open());
+
+// The toolbar's keyboard hint, generated rather than typed. It was a hardcoded string listing
+// five shortcuts, which made three descriptions of the keymap in the codebase; there is one now.
+el('hint').textContent = LISTED_SHORTCUTS.map((s) => s.label).join(' · ');
+el('hint').title = LISTED_SHORTCUTS.map((s) => `${s.label} — ${s.does}`).join('\n');
+
+/**
+ * Dispatch from `SHORTCUTS` rather than from a ladder of `if`s.
+ *
+ * The shortcuts are data because **help lists them**, and a list typed out by hand beside a
+ * handler is a second description free to rot. One array now: the handler reads it and so does
+ * the help section, so a key cannot be documented without existing.
+ */
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
-  if (stepper.isOpen) return;
-  if (e.code === 'Space') { e.preventDefault(); setRunning(!state.running); }
-  if (e.key === 'r' || e.key === 'R') el('btn-reset').click();
-  if (e.key === 'm' || e.key === 'M') setMode(state.mode === 'manual' ? 'evolved' : 'manual');
-  if (e.key === 'Escape') setDrawer(null);
-  if (e.key === '2') setView('2d');
-  if (e.key === '3') setView('3d');
-  if (e.key === 's' || e.key === 'S') stepper.open();
+
+  const shortcut = shortcutFor(e);
+  if (!shortcut) return;
+
+  // Escape closes whatever is on top, and is the only key that works while an overlay is open.
+  if (shortcut.key === 'Escape') {
+    if (help.isOpen) help.close();
+    else setDrawer(null);
+    return;
+  }
+  if (help.isOpen || stepper.isOpen) return;
+
+  switch (shortcut.key) {
+    case 'Space': e.preventDefault(); setRunning(!state.running); return;
+    case 'r': el('btn-reset').click(); return;
+    case 'm': setMode(state.mode === 'manual' ? 'evolved' : 'manual'); return;
+    case '2': setView('2d'); return;
+    case '3': setView('3d'); return;
+    case 's': stepper.open(); return;
+    case '?': help.open(); return;
+  }
 });
 
 let urlTimer = 0;

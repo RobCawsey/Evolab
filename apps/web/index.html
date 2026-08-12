@@ -512,8 +512,16 @@
       .seg.wide button { flex: 1; }
 
       /* stepper */
+      /*
+        Above the drawers, not below them.
+
+        Full-screen overlays sat at z-index 20 while the narrow-width side drawers sit at 30, so
+        below 1000px an open drawer rendered *on top of* the stepper and the help text. Found
+        with help at 560px; the stepper has had it since the drawers arrived in slice 11.
+        Anything that covers the whole app has to outrank anything that covers part of it.
+      */
       .stepper {
-        position: fixed; inset: 0; z-index: 20; background: var(--bg);
+        position: fixed; inset: 0; z-index: 50; background: var(--bg);
         display: flex; flex-direction: column;
       }
       .stepper[hidden] { display: none; }
@@ -522,6 +530,47 @@
         font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
         padding: 2px 7px; border-radius: 2px; border: 1px solid var(--line); color: var(--dim);
       }
+      /*
+        help — slice 15. Full screen like the stepper, because eight sections of prose in a
+        300px drawer is a scroll tunnel. The reading column is capped at 68ch: long lines are
+        the single easiest way to make explanation unreadable, and this one is meant to be read.
+      */
+      .hp-body { flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; }
+      .hp-nav {
+        border-right: 1px solid var(--line); padding: 14px 0; overflow-y: auto;
+        display: flex; flex-direction: column;
+      }
+      .hp-link {
+        background: none; border: 0; text-align: left; cursor: pointer;
+        padding: 7px 16px; color: var(--dim); font-size: 13px;
+      }
+      .hp-link:hover { color: var(--text); background: var(--panel); }
+      .hp-read { overflow-y: auto; padding: 28px 34px 80px; }
+      .hp-section { max-width: 68ch; margin-bottom: 44px; }
+      .hp-section h3 {
+        font-size: 19px; margin: 0 0 14px; padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      .hp-section > p { font-size: 14.5px; line-height: 1.65; color: var(--text); margin: 0 0 14px; }
+      .hp-steps { margin: 0 0 16px; padding-left: 22px; }
+      .hp-steps li { font-size: 14.5px; line-height: 1.65; margin-bottom: 11px; }
+      .hp-terms { display: flex; flex-direction: column; gap: 15px; margin-bottom: 16px; }
+      .hp-term h4 { margin: 0 0 4px; font-size: 13.5px; color: var(--amber); }
+      .hp-term p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--dim); }
+      .hp-keys { display: flex; flex-direction: column; gap: 9px; margin-bottom: 16px; }
+      .hp-key { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: baseline; gap: 12px; }
+      .hp-key kbd {
+        font-family: var(--mono); font-size: 11px; text-align: center; padding: 3px 0;
+        border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px;
+        background: var(--panel2); color: var(--text);
+      }
+      .hp-key span { font-size: 14px; line-height: 1.55; color: var(--dim); }
+      @media (max-width: 720px) {
+        .hp-body { grid-template-columns: minmax(0, 1fr); }
+        .hp-nav { display: none; }
+        .hp-read { padding: 18px 16px 60px; }
+      }
+
       .st-body { flex: 1; display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; min-height: 0; }
       .st-stages { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
       .st-detail { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -595,8 +644,9 @@
       <button id="btn-panel-right" class="narrow-only">Run data</button>
       <button id="btn-challenges">Challenges</button>
       <button id="btn-stepper">Show me how this works →</button>
+      <button id="btn-help" title="Help — what everything here means (?)">Help</button>
       <span class="spacer"></span>
-      <span class="hint">Space — run/pause &nbsp;·&nbsp; R — reset &nbsp;·&nbsp; M — mode &nbsp;·&nbsp; 2/3 — view &nbsp;·&nbsp; S — stepper</span>
+      <span class="hint" id="hint"></span>
     </header>
 
     <main>

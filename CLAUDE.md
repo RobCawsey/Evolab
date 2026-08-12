@@ -18,6 +18,25 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 15 — "Help".** A full-screen reference at `?` or the toolbar button, written for
+somebody who has never seen a genetic algorithm: what this is, a five-step first run, what every
+panel is, a glossary of every number on screen, the twelve ideas, and the keyboard. Not on the
+original list — asked for after slice 14, and squarely inside the project's own first line.
+
+**Help does not restate what the app already knows.** The ideas come from `NOTES`, the goals from
+`PRESETS`, the scorecard rows from `TASKS`, the keys from `LISTED_SHORTCUTS` — and four tests
+assert **identity, not similarity**, because a paraphrase is exactly the drift the arrangement
+prevents. The prose that exists only here names its panels by element id, and a test reads
+`index.html` to check every one is real.
+
+**`ui/keymap.ts` is now the only description of the shortcuts.** They were a ladder of `if`s in
+`main.ts` plus a hardcoded hint strip, and help would have been a third copy. The handler
+dispatches from the array, the hint strip is generated from it, help renders it.
+
+**Full-screen overlays sat below the drawers** — `.stepper` at z-index 20 against the drawers at
+30, so below 1000 px an open drawer covered the help text *and the stepper*, which had the bug
+since slice 11. Anything covering the whole app has to outrank anything covering part of it.
+
 **Slice 14 — "Task suite". The last slice on the list; nothing after it is planned.** Six tasks,
 five seeds each, on ground the gait was never evolved on. A scorecard panel under the behaviour
 map, and `npm run tasks` headless. §6 of the design document, **now amended** — the fifth

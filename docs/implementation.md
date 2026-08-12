@@ -240,6 +240,7 @@ and how to drive it; it does not know what a population is.
 | 12 | [The server](#slice-12--the-server) | 3 | **complete** |
 | 13 | [Community archive](#slice-13--community-archive) | 1 | **complete** |
 | 14 | [Task suite](#slice-14--task-suite) | 3 | **complete** |
+| 15 | [Help](#slice-15--help) | 1 | **complete** |
 
 **Slices 0–3 are the spine.** They end with a genetic algorithm evolving a gait while you
 watch a fitness curve climb. Everything after slice 3 is enrichment and can be reordered or
@@ -2965,6 +2966,89 @@ which §14 defers out of v1 entirely, and it would make the archive descriptors 
 `CONTACT_EPSILON` in `evaluate.ts` says the floor stays flat "until the challenge track in slice
 14" — the challenge track was slice 11, and slice 14 is this. And the §6 mockups print `CoT
 0.31`, which is a number this project cannot measure.
+
+---
+
+## Slice 15 — Help
+
+> **Status: built.** One session. Not on the original list — asked for after slice 14, and
+> squarely inside the project's own first line: *teaching tool first, simulator second.*
+
+### Goal
+
+A reference you can read start to finish, written for somebody who has never seen a genetic
+algorithm and has just opened the app. `?` or the toolbar button, full screen like the stepper.
+
+Everything the app had until now was **contextual**: guided afterwords, challenge cards, panel
+notes, task `teaches` lines. All of it answers a question you already knew to ask. None of it
+answers *what am I looking at*.
+
+### The rule: help does not restate what the app already knows
+
+A help section is a second description of the product, and second descriptions rot. This one is
+mostly generated:
+
+| section | source |
+|---|---|
+| The ideas behind it | `NOTES` — the twelve concept notes, verbatim |
+| What you are asking for | `PRESETS` — goal names and blurbs |
+| The scorecard | `TASKS` — each task's own `teaches` line |
+| Keyboard | `LISTED_SHORTCUTS` |
+
+Four tests assert **identity, not similarity** — `conceptRows()` must equal `NOTES`, not merely
+have the same length. A paraphrase would be exactly the drift the arrangement exists to prevent.
+
+What is left is prose that exists nowhere else: what the thing is, a five-step first run, what
+each panel is, and a glossary of every number on screen. The one part of *that* which can rot is
+the elements it names, so each panel row carries the id it describes and a test reads
+`index.html` and asserts every one is really there.
+
+### The keymap became data, and it had been three descriptions
+
+The shortcuts lived in a ladder of `if`s in `main.ts`, with a hardcoded hint strip in the
+toolbar listing five of them, and help would have been a third copy. `ui/keymap.ts` is now the
+only description: the handler dispatches from it, the hint strip is generated from it, and help
+renders it. A key cannot be documented without existing or exist without being documented.
+
+Writing the test caught the first casualty immediately — `?` was documented as *"Open this
+help."*, fifteen characters, against a rule that every shortcut gets a sentence a beginner could
+act on. The fix was to write a better sentence, not to lower the threshold.
+
+### Two bugs, one of them older than the slice
+
+**Markdown emphasis rendered literally.** The copy used `*you*` and `*kind*` for contrast, and
+it goes through `textContent`, so readers saw the asterisks. The contrast carries meaning in
+those sentences, so rather than flatten the writing there is now a one-rule renderer: `*…*` →
+`<em>`, building text nodes and never touching `innerHTML`. `emphasisParts` is split out so the
+parsing tests in Node without a DOM, and one test walks **every string in the help copy** and
+asserts no marker survives rendering — which is the guard that would have caught it.
+
+**Full-screen overlays sat below the drawers.** `.stepper` was `z-index: 20`; the narrow-width
+side drawers are `30`. So below 1000 px an open drawer rendered *on top of* the help text — and
+on top of the stepper, which has had the bug since the drawers arrived in slice 11. Found at
+560 px. Anything covering the whole app has to outrank anything covering part of it.
+
+### Deliberately not in this slice
+
+**No tour, no tooltips, no pointer hijacking.** §7 is explicit that the temptation with an
+educational build is to wrap the real application in a layer of explanation and call it taught.
+Help is a place you go, deliberately, and it does not follow you out.
+
+**No search.** Eight sections with a contents list down the side; a search box over 43 paragraphs
+is machinery, not navigation.
+
+**No screenshots or diagrams.** They are the first thing to go stale, and this app can show the
+reader the real panel in one click instead.
+
+### Done when
+
+- [x] `?`, the toolbar button and the ⋯ menu all open it; `Escape` and Close close it.
+- [x] Other shortcuts are inert while it is open — verified by firing `R` and watching the
+      generation counter not move.
+- [x] Nothing in it is retyped from data the app already holds, and four tests assert identity.
+- [x] Every element it names exists in `index.html`, checked by reading the file.
+- [x] It reads single-column below 720 px with no horizontal scroll, and covers the drawers.
+- [x] 310 tests, golden 6.4598 unchanged.
 
 ---
 
