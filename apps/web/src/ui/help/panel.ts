@@ -19,6 +19,7 @@ import {
   conceptRows,
   goalRows,
   HELP,
+  panelHeaders,
   taskRows,
   type HelpBlock,
   type HelpSection,
@@ -26,7 +27,8 @@ import {
 import { LISTED_SHORTCUTS } from '../keymap.ts';
 
 export interface HelpPanel {
-  open(sectionId?: string): void;
+  /** Full element id to land on — a section (`hp-what`) or a panel row (`hp-panel-chart`). */
+  open(anchor?: string): void;
   close(): void;
   readonly isOpen: boolean;
 }
@@ -76,12 +78,20 @@ export function emphasisParts(text: string): readonly EmphasisPart[] {
   return parts;
 }
 
-function termList(items: readonly { readonly term: string; readonly text: string }[]): HTMLElement {
+interface TermRow {
+  readonly term: string;
+  readonly text: string;
+  /** Set on panel rows, so a panel's `?` can land on its own paragraph. */
+  readonly anchor?: string;
+}
+
+function termList(items: readonly TermRow[]): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'hp-terms';
   for (const item of items) {
     const row = document.createElement('div');
     row.className = 'hp-term';
+    if (item.anchor) row.id = item.anchor;
     const dt = document.createElement('h4');
     dt.textContent = item.term;
     const dd = emphasise(item.text, document.createElement('p'));
@@ -90,6 +100,9 @@ function termList(items: readonly { readonly term: string; readonly text: string
   }
   return wrap;
 }
+
+/** The anchor a panel's `?` scrolls to. One rule, used by the renderer and by the button. */
+export const panelAnchor = (id: string): string => `hp-panel-${id}`;
 
 function renderBlock(block: HelpBlock): HTMLElement {
   switch (block.kind) {
@@ -108,8 +121,10 @@ function renderBlock(block: HelpBlock): HTMLElement {
 
     case 'panels':
       // Rendered as terms, but each row carries the id it describes — which is the thing
-      // `help.test.ts` checks against `index.html`.
-      return termList(block.items.map((i) => ({ term: i.name, text: i.text })));
+      // `help.test.ts` checks against `index.html` — and an anchor its `?` control links to.
+      return termList(block.items.map((i) => ({
+        term: i.name, text: i.text, anchor: panelAnchor(i.id),
+      })));
 
     case 'concepts':
       return termList(conceptRows());
@@ -148,6 +163,46 @@ function renderSection(section: HelpSection): HTMLElement {
   return el;
 }
 
+/**
+ * Put a `?` in each panel header that opens help at that panel's paragraph.
+ *
+ * Called after every panel has been built, because several of them create their own header —
+ * the scorecard, the runs list, the body editor and the challenge track all do. A header that
+ * cannot be found is **reported rather than ignored**: this is exactly the kind of wiring that
+ * rots silently when a panel is renamed, and a `?` that quietly stops appearing is worse than
+ * one that never did.
+ *
+ * Returns the ids it could not find, so the caller can decide how loud to be.
+ */
+export function attachHelpButtons(help: HelpPanel): readonly string[] {
+  const missing: string[] = [];
+  for (const { header, id } of panelHeaders()) {
+    const bar = document.getElementById(header);
+    if (!bar) {
+      missing.push(header);
+      continue;
+    }
+    if (bar.querySelector('.ph-help')) continue;
+
+    const button = document.createElement('button');
+    button.className = 'ph-help';
+    button.type = 'button';
+    button.textContent = '?';
+    button.title = 'What is this panel?';
+    button.setAttribute('aria-label', 'Help for this panel');
+    button.addEventListener('click', (e) => {
+      // The archive header's Mine/Everyone buttons sit in the same bar; stopping here keeps a
+      // click on `?` from reading as a click on the panel behind it.
+      e.stopPropagation();
+      help.open(panelAnchor(id));
+    });
+
+    // After the spacer if there is one, so `?` lands hard right rather than beside the title.
+    bar.append(button);
+  }
+  return missing;
+}
+
 export function createHelp(host: HTMLElement): HelpPanel {
   const root = document.createElement('div');
   root.className = 'stepper hp';
@@ -179,7 +234,7 @@ export function createHelp(host: HTMLElement): HelpPanel {
     link.className = 'hp-link';
     link.textContent = section.title;
     link.addEventListener('click', () => {
-      root.querySelector(`#hp-${section.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      panel.open(`hp-${section.id}`);
     });
     return link;
   }));
@@ -187,12 +242,14 @@ export function createHelp(host: HTMLElement): HelpPanel {
   let open = false;
 
   const panel: HelpPanel = {
-    open(sectionId?: string): void {
+    open(anchor?: string): void {
       open = true;
       root.hidden = false;
-      // Always land at the top of the requested section rather than wherever it was left, so
-      // opening help twice gives the same answer twice.
-      const target = sectionId ? root.querySelector(`#hp-${sectionId}`) : null;
+      // Always land at the top of the requested anchor rather than wherever it was left, so
+      // opening help twice gives the same answer twice. The id is passed whole rather than as
+      // a suffix — building it here once meant `hp-` + `hp-panel-chart`, which matched nothing
+      // and silently fell back to the top of the document.
+      const target = anchor ? root.querySelector(`#${anchor}`) : null;
       if (target) target.scrollIntoView({ block: 'start' });
       else read.scrollTop = 0;
       root.querySelector<HTMLButtonElement>('#hp-close')!.focus();
@@ -207,6 +264,8 @@ export function createHelp(host: HTMLElement): HelpPanel {
   };
 
   root.querySelector('#hp-close')!.addEventListener('click', () => panel.close());
+
+
   // Clicking the background closes; clicking the text does not, so selecting a sentence is safe.
   root.addEventListener('mousedown', (e) => {
     if (e.target === root) panel.close();

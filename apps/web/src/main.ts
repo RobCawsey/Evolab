@@ -38,7 +38,7 @@ import type { ThreeView } from './render/three/scene.ts';
 import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createToolbar } from './ui/toolbar.ts';
-import { createHelp } from './ui/help/panel.ts';
+import { attachHelpButtons, createHelp } from './ui/help/panel.ts';
 import { LISTED_SHORTCUTS, shortcutFor } from './ui/keymap.ts';
 import { createGuided } from './ui/guided.ts';
 import { createEditor, decodeSpec, encodeSpec } from './ui/editor.ts';
@@ -1543,6 +1543,15 @@ async function boot(): Promise<void> {
   const shared = params.get('shared');
   if (shared) void openSharedRun(shared);
   void refreshRuns();
+
+  // Last, because several panels build their own header and the `?` needs somewhere to go.
+  // A missing header is a wiring bug rather than a state — a `?` that quietly stops appearing
+  // is worse than one that never did — so it is said out loud rather than swallowed.
+  const missing = attachHelpButtons(help);
+  if (missing.length > 0) {
+    console.error(`help: no panel header found for ${missing.join(', ')}`);
+  }
+
   requestAnimationFrame(frame);
 }
 

@@ -23,7 +23,7 @@ export interface RunsPanel {
 
 export function createRunsPanel(host: HTMLElement, handlers: RunsHandlers): RunsPanel {
   host.innerHTML = `
-    <div class="ph">Saved runs<span class="sp"></span><em id="rn-count"></em></div>
+    <div class="ph" id="ph-runs">Saved runs<span class="sp"></span><em id="rn-count"></em></div>
     <div class="stats">
       <button id="rn-save" class="wide" disabled>Save this run</button>
       <p class="gd-note" id="rn-note">

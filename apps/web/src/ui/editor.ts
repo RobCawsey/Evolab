@@ -45,7 +45,7 @@ export function createEditor(host: HTMLElement, handlers: EditorHandlers): Edito
   const rows: Row[] = [];
 
   host.innerHTML = `
-    <div class="ph">Body<span class="sp"></span><em>symmetric · 6 joints</em></div>
+    <div class="ph" id="ph-editor">Body<span class="sp"></span><em>symmetric · 6 joints</em></div>
     <div class="ed-body" id="ed-rows"></div>
     <div class="ph">Measurements</div>
     <div class="stats" id="ed-stats">

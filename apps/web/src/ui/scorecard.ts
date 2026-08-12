@@ -65,7 +65,7 @@ export function createScorecardPanel(
   onRun: () => void,
 ): ScorecardPanel {
   host.innerHTML = `
-    <div class="ph explorer-only">Scorecard<span class="sp"></span><em id="sc-overall"></em></div>
+    <div class="ph explorer-only" id="ph-scorecard">Scorecard<span class="sp"></span><em id="sc-overall"></em></div>
     <div class="stats explorer-only">
       <button id="sc-run" class="wide" disabled>Test this gait</button>
     </div>

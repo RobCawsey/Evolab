@@ -35,7 +35,7 @@ export function createTrack(host: HTMLElement, handlers: TrackHandlers): TrackPa
   // scrolling column — clicking a `?` appeared to do nothing at all. Above the list it is
   // always the thing that just changed.
   host.innerHTML = `
-    <div class="ph">Challenges<span class="sp"></span><em id="ch-count">0 of 12 concepts</em></div>
+    <div class="ph" id="ph-challenges">Challenges<span class="sp"></span><em id="ch-count">0 of 12 concepts</em></div>
     <div class="ch-dots" id="ch-dots"></div>
     <div class="ph" id="ch-note-head" hidden>Explanation<span class="sp"></span><em>what this means</em></div>
     <div class="ch-note" id="ch-note" hidden></div>

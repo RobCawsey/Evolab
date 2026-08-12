@@ -29,6 +29,11 @@ assert **identity, not similarity**, because a paraphrase is exactly the drift t
 prevents. The prose that exists only here names its panels by element id, and a test reads
 `index.html` to check every one is real.
 
+**Each panel header carries a `?`** that opens help at that panel's own paragraph — seven of them.
+Attachment happens last in `boot()` because four panels build their own header, and a header that
+cannot be found is reported rather than skipped. The gait controls had no header at all until
+now, which is why the busiest column began with an unlabelled row of sliders.
+
 **`ui/keymap.ts` is now the only description of the shortcuts.** They were a ladder of `if`s in
 `main.ts` plus a hardcoded hint strip, and help would have been a third copy. The handler
 dispatches from the array, the hint strip is generated from it, help renders it.

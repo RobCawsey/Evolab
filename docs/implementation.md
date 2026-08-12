@@ -3028,6 +3028,32 @@ side drawers are `30`. So below 1000 px an open drawer rendered *on top of* the 
 on top of the stepper, which has had the bug since the drawers arrived in slice 11. Found at
 560 px. Anything covering the whole app has to outrank anything covering part of it.
 
+### The `?` on each panel header
+
+Seven of them, and each opens help **at that panel's paragraph** rather than at the top of a
+section the reader then has to search. `panelAnchor(id)` is the one rule, used by the renderer
+that stamps the anchor and by the button that jumps to it.
+
+Two things fell out of wiring it:
+
+**The gait controls had no header at all** — the busiest column in the app began with an
+unlabelled row of sliders, and the panel a beginner most needs help with had nowhere to put a
+`?`. It has one now.
+
+**`open()` prefixed `hp-` itself**, and `panelAnchor` already included it, so every panel button
+looked for `#hp-hp-panel-chart`, matched nothing, and **silently fell back to the top of the
+document** — the failure mode that looks like a design decision. It takes the whole element id
+now, and the contents links pass theirs.
+
+Attachment happens last in `boot()`, because four panels build their own header, and a header
+that cannot be found is reported to the console rather than skipped: a `?` that quietly stops
+appearing is worse than one that never did. A test pairs every declared header with a panel help
+really describes, and asserts each id appears in the source — in markup or as a property
+assignment, since both idioms are used.
+
+**Panel headers no longer wrap.** They are a fixed 28 px bar and the title is a bare text node,
+so in the 236 px left column it wrapped to two lines — which the bar did not clip but did make
+look broken. `white-space: nowrap`, and the subtitle gives way with an ellipsis.
 ### Deliberately not in this slice
 
 **No tour, no tooltips, no pointer hijacking.** §7 is explicit that the temptation with an
@@ -3048,7 +3074,9 @@ reader the real panel in one click instead.
 - [x] Nothing in it is retyped from data the app already holds, and four tests assert identity.
 - [x] Every element it names exists in `index.html`, checked by reading the file.
 - [x] It reads single-column below 720 px with no horizontal scroll, and covers the drawers.
-- [x] 310 tests, golden 6.4598 unchanged.
+- [x] Each panel header carries a `?` that opens help at its own paragraph — seven of them,
+      verified in the browser landing on the right heading each time.
+- [x] 314 tests, golden 6.4598 unchanged.
 
 ---
 

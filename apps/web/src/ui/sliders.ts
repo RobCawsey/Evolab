@@ -36,6 +36,15 @@ export function createSliders(
   let current = initial;
   const inputs: { el: HTMLInputElement; out: HTMLElement; read: (p: GaitParams) => number }[] = [];
 
+  // A panel header, added in slice 15. The gait controls were the one panel without one, which
+  // left the busiest column in the app starting with an unlabelled row of sliders — and left
+  // the `?` control nowhere to live on the panel a beginner needs it on most.
+  const head = document.createElement('div');
+  head.className = 'ph';
+  head.id = 'ph-sliders';
+  head.innerHTML = 'Gait controls<span class="sp"></span>';
+  host.append(head);
+
   function row(
     label: string,
     min: number,

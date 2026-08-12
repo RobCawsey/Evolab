@@ -137,13 +137,31 @@
         header { gap: 7px; padding: 0 8px; }
       }
 
+      /*
+        A fixed 28px bar, so nothing in it may wrap. The title is a bare text node and therefore
+        an anonymous flex item: in the 236px left column it wrapped to two lines, which the bar
+        did not clip but did look broken. The subtitle gives way with an ellipsis instead.
+      */
       .ph {
         display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 28px; flex: none;
         border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px;
         letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
+        white-space: nowrap;
       }
-      .ph em { font-style: normal; color: var(--faint); letter-spacing: 0; text-transform: none; font-size: 11px; }
+      .ph em {
+        font-style: normal; color: var(--faint); letter-spacing: 0; text-transform: none;
+        font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      }
       .ph .sp { flex: 1; }
+      /*
+        The per-panel `?`. Sits at the end of the header bar, dim until hovered, and pushed
+        hard right by the header's own spacer where there is one.
+      */
+      .ph-help {
+        margin-left: auto; border: 0; background: none; cursor: pointer; padding: 0 2px;
+        font-family: var(--mono); font-size: 12px; line-height: 1; color: var(--faint);
+      }
+      .ph-help:hover { color: var(--amber); }
 
       /*
         A two-state switch inside a panel header — slice 13's Mine / Everyone. Small enough to
@@ -682,7 +700,7 @@
       </div>
 
       <aside class="right">
-        <div class="ph">Fitness<span class="sp"></span><em id="chart-gen">generation 0</em></div>
+        <div class="ph" id="ph-chart">Fitness<span class="sp"></span><em id="chart-gen">generation 0</em></div>
         <canvas id="chart"></canvas>
         <div class="legend">
           <s style="color:var(--amber)">▬ best</s>
@@ -709,7 +727,7 @@
         <div class="ph lab-only">Islands<span class="sp"></span><em>ring · 2 elites every 5 gens</em></div>
         <div class="stats lab-only" id="islands"></div>
 
-        <div class="ph explorer-only">Behaviour map<span class="sp"></span>
+        <div class="ph explorer-only" id="ph-archive">Behaviour map<span class="sp"></span>
           <div class="seg" id="arch-scope">
             <button type="button" id="arch-mine" class="on">Mine</button
             ><button type="button" id="arch-all">Everyone</button>

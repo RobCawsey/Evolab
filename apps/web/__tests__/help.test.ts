@@ -6,7 +6,7 @@ import { NOTES } from '../src/challenges/notes.ts';
 import { PRESETS } from '../src/run/objectives.ts';
 import { LISTED_SHORTCUTS, SHORTCUTS, shortcutFor } from '../src/ui/keymap.ts';
 import {
-  conceptRows, goalRows, HELP, referencedIds, taskRows,
+  conceptRows, goalRows, HELP, panelHeaders, referencedIds, taskRows,
 } from '../src/ui/help/content.ts';
 import { emphasisParts } from '../src/ui/help/panel.ts';
 
@@ -163,6 +163,45 @@ describe('emphasis', () => {
     for (const text of texts) {
       const rendered = emphasisParts(text).map((p) => p.text).join('');
       expect(rendered, text.slice(0, 40)).not.toContain('*');
+    }
+  });
+});
+
+describe('the per-panel ? control', () => {
+  it('points every declared header at a panel help really describes', () => {
+    const ids = new Set(referencedIds());
+    for (const { header, id } of panelHeaders()) {
+      expect(ids, `${header} → ${id}`).toContain(id);
+    }
+  });
+
+  it('declares each header once', () => {
+    const headers = panelHeaders().map((p) => p.header);
+    expect(new Set(headers).size).toBe(headers.length);
+  });
+
+  it('names a header that exists somewhere in the app', () => {
+    // Some headers are static in index.html and some are built by the panel that owns them —
+    // the scorecard, the runs list, the body editor, the challenge track and the sliders all
+    // create their own. Either way the id has to appear in the source, and this is what
+    // catches a rename before the `?` silently stops appearing.
+    const sources = [
+      html,
+      ...['ui/sliders.ts', 'ui/editor.ts', 'ui/scorecard.ts', 'net/panel.ts', 'challenges/track.ts']
+        .map((f) => readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), 'utf8')),
+    ].join('\n');
+
+    // Either idiom counts — `id="ph-chart"` in markup, or `head.id = 'ph-sliders'` in code.
+    for (const { header } of panelHeaders()) {
+      const found = sources.includes(`id="${header}"`) || sources.includes(`'${header}'`);
+      expect(found, `${header} is set somewhere`).toBe(true);
+    }
+  });
+
+  it('covers the panels a beginner opens first', () => {
+    const covered = new Set(panelHeaders().map((p) => p.id));
+    for (const id of ['sliders', 'chart', 'archive', 'scorecard']) {
+      expect(covered, id).toContain(id);
     }
   });
 });

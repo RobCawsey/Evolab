@@ -28,7 +28,16 @@ export type HelpBlock =
   | { readonly kind: 'steps'; readonly items: readonly string[] }
   | { readonly kind: 'terms'; readonly items: readonly { readonly term: string; readonly text: string }[] }
   /** One row per panel, keyed by the element it describes so the id can be checked. */
-  | { readonly kind: 'panels'; readonly items: readonly { readonly id: string; readonly name: string; readonly text: string }[] }
+  | {
+      readonly kind: 'panels';
+      readonly items: readonly {
+        readonly id: string;
+        readonly name: string;
+        readonly text: string;
+        /** Id of this panel's header, where its `?` control is injected. Absent when it has none. */
+        readonly header?: string;
+      }[];
+    }
   | { readonly kind: 'keys' }
   | { readonly kind: 'concepts' }
   | { readonly kind: 'goals' }
@@ -157,6 +166,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'sliders',
+            header: 'ph-sliders',
             name: 'Gait controls',
             text:
               'Eleven numbers that completely describe how this robot walks. Each joint swings '
@@ -167,6 +177,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'editor',
+            header: 'ph-editor',
             name: 'Body',
             text:
               'The robot itself: how long its thighs are, how big its feet are, how heavy it is. '
@@ -176,6 +187,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'chart',
+            header: 'ph-chart',
             name: 'Fitness',
             text:
               'One point per generation. Orange is the best robot in that generation, teal is '
@@ -185,6 +197,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'archive',
+            header: 'ph-archive',
             name: 'Behaviour map',
             text:
               'A grid of every *kind* of walk found, rather than of how good they were. Across '
@@ -195,6 +208,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'scorecard',
+            header: 'ph-scorecard',
             name: 'Scorecard',
             text:
               'What the gait is worth on ground it was never evolved on. Press the button and it '
@@ -213,6 +227,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'challenges',
+            header: 'ph-challenges',
             name: 'Challenges',
             text:
               'Eleven cards, each naming one idea and setting the app up to show it in a single '
@@ -221,6 +236,7 @@ export const HELP: readonly HelpSection[] = [
           },
           {
             id: 'runs',
+            header: 'ph-runs',
             name: 'Saved runs',
             text:
               'Only present when a server is running. Saving is optional and never blocks '
@@ -406,6 +422,18 @@ export const goalRows = (): readonly HelpRow[] =>
 /** The scorecard tasks, as help rows. Sourced from the suite itself. */
 export const taskRows = (): readonly HelpRow[] =>
   TASKS.map((t) => ({ term: t.name, text: t.teaches }));
+
+/** Every panel header that gets a  control, paired with the help row it opens. */
+export function panelHeaders(): readonly { readonly header: string; readonly id: string }[] {
+  const out: { header: string; id: string }[] = [];
+  for (const section of HELP) {
+    for (const block of section.blocks) {
+      if (block.kind !== 'panels') continue;
+      for (const item of block.items) if (item.header) out.push({ header: item.header, id: item.id });
+    }
+  }
+  return out;
+}
 
 /** Every element id the help text claims exists, for the test that checks they do. */
 export function referencedIds(): readonly string[] {
