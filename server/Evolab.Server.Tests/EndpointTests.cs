@@ -18,6 +18,7 @@ public sealed class EndpointTests : IClassFixture<EndpointTests.Host>
     {
         public FakeRunRepository Runs { get; } = new();
         public FakeTrajectoryStore Trajectories { get; } = new();
+        public FakeCommunityArchive Community { get; } = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -29,6 +30,7 @@ public sealed class EndpointTests : IClassFixture<EndpointTests.Host>
             {
                 services.AddSingleton<IRunRepository>(Runs);
                 services.AddSingleton<ITrajectoryStore>(Trajectories);
+                services.AddSingleton<ICommunityArchive>(Community);
             });
         }
     }

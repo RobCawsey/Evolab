@@ -23,6 +23,7 @@ if (builder.Configuration.GetValue("Evolab:UseDatabase", true))
     builder.Services.AddDbContext<EvolabContext>(options =>
         options.UseSqlite($"Data Source={Path.Combine(dataDir, "evolab.db")}"));
     builder.Services.AddScoped<IRunRepository, RunRepository>();
+    builder.Services.AddScoped<ICommunityArchive, CommunityArchive>();
     builder.Services.AddSingleton<ITrajectoryStore>(
         _ => new FileTrajectoryStore(Path.Combine(dataDir, "trajectories")));
 }
@@ -41,7 +42,9 @@ using (var scope = app.Services.CreateScope())
 {
     // EnsureCreated, not migrations. One SQLite file on one machine; when there are two of
     // anything, revisit (§5).
-    scope.ServiceProvider.GetService<EvolabContext>()?.Database.EnsureCreated();
+    var db = scope.ServiceProvider.GetService<EvolabContext>();
+    db?.Database.EnsureCreated();
+    if (db is not null) Schema.AddMissingTables(db);
 }
 
 app.MapApi();

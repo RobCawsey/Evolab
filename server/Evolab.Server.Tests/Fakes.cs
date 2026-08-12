@@ -60,6 +60,35 @@ public sealed class FakeRunRepository : IRunRepository
     }
 }
 
+/// <summary>
+/// A dictionary with the same insertion rule. Enough to prove what the *endpoint* does with a
+/// contribution — and, as slice 12 recorded, incapable of proving anything about persistence.
+/// The rule itself is pinned against real SQLite in <see cref="CommunityRepositoryTests"/>.
+/// </summary>
+public sealed class FakeCommunityArchive : ICommunityArchive
+{
+    public Dictionary<int, CommunityCell> Cells { get; } = [];
+
+    public Task<Contribution> ContributeAsync(Run run, CancellationToken ct)
+    {
+        foreach (var cell in run.Archive)
+        {
+            if (Cells.TryGetValue(cell.Index, out var held) && held.Fitness >= cell.Fitness) continue;
+            Cells[cell.Index] = new CommunityCell
+            {
+                Index = cell.Index, RunId = run.Id, RunTitle = run.Title, BodySpec = run.BodySpec,
+                Fitness = cell.Fitness, Stride = cell.Stride, Duty = cell.Duty, Genes = cell.Genes,
+            };
+        }
+        return Task.FromResult(new Contribution(
+            Cells.Values.Count(c => c.RunId == run.Id), Cells.Count));
+    }
+
+    public Task<IReadOnlyList<CommunityCell>> ListAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<CommunityCell>>(
+            Cells.Values.OrderBy(c => c.Index).ToList());
+}
+
 public sealed class FakeTrajectoryStore : ITrajectoryStore
 {
     public Dictionary<string, byte[]> Files { get; } = [];

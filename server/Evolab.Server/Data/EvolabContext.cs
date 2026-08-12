@@ -5,9 +5,20 @@ namespace Evolab.Server.Data;
 public sealed class EvolabContext(DbContextOptions<EvolabContext> options) : DbContext(options)
 {
     public DbSet<Run> Runs => Set<Run>();
+    public DbSet<CommunityCell> Community => Set<CommunityCell>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        // The grid index is the key, which is what bounds the table at 576 rows for ever. It
+        // is not generated: the value means something, and letting EF invent one would allow
+        // two rows to claim the same cell.
+        var cell = model.Entity<CommunityCell>();
+        cell.ToTable("CommunityCells");
+        cell.HasKey(c => c.Index);
+        cell.Property(c => c.Index).ValueGeneratedNever();
+        // "How many runs are in this map" is a distinct count over this column.
+        cell.HasIndex(c => c.RunId);
+
         var run = model.Entity<Run>();
         run.HasKey(r => r.Id);
 

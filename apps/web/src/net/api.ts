@@ -15,7 +15,9 @@ import {
   CLIENT_CODES,
   type ApiError,
   type ApiResult,
+  type CommunityDto,
   type ProblemDetails,
+  type Published,
   type RunRecord,
   type RunSummary,
 } from './types.ts';
@@ -147,9 +149,12 @@ export const api = {
   getRun: (id: string): Promise<ApiResult<RunRecord>> => request(`/runs/${id}`),
   saveRun: (run: unknown): Promise<ApiResult<RunSummary>> =>
     request('/runs', { method: 'POST', body: run }),
-  publishRun: (id: string): Promise<ApiResult<{ token: string }>> =>
+  /** Mints a share token **and** contributes this run's elites to the community archive. */
+  publishRun: (id: string): Promise<ApiResult<Published>> =>
     request(`/runs/${id}/publish`, { method: 'POST' }),
   getShared: (token: string): Promise<ApiResult<RunRecord>> => request(`/shared/${token}`),
+  /** At most 576 cells, however many runs are behind them. */
+  getCommunity: (): Promise<ApiResult<CommunityDto>> => request('/archive'),
 };
 
 /* ---------------- the report ring ---------------- */

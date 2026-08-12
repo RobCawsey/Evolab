@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Evolab.Server;
 
 /// <summary>
-/// Eight endpoints and no layer above them. The endpoint <em>is</em> the handler — if a
+/// Nine endpoints and no layer above them. The endpoint <em>is</em> the handler — if a
 /// method would only forward to the repository, the endpoint calls the repository.
 ///
 /// Failures are RFC 9457 <c>ProblemDetails</c> with a short stable <c>code</c> extension, and
@@ -47,13 +47,25 @@ public static class Endpoints
             return Results.Created($"/api/runs/{id}", RunSummaryDto.From(saved!));
         });
 
-        api.MapPost("/runs/{id:guid}/publish", async (Guid id, IRunRepository runs, CancellationToken ct) =>
+        // One action, two effects — §5's endpoint table says so: mint a share token *and*
+        // contribute this run's elites to the community archive. Publishing is the only
+        // explicit "make this public" gesture in the app, so it is the only honest place to
+        // hang contribution off; a separate button would let one happen without the other and
+        // leave nobody able to say which.
+        api.MapPost("/runs/{id:guid}/publish", async (
+            Guid id, IRunRepository runs, ICommunityArchive community, CancellationToken ct) =>
         {
             var token = await runs.PublishAsync(id, ct);
-            return token is null
-                ? Problem(404, "run_not_found", "That run does not exist.")
-                : Results.Ok(new { token });
+            if (token is null) return Problem(404, "run_not_found", "That run does not exist.");
+            var run = await runs.GetAsync(id, ct);
+            var contribution = await community.ContributeAsync(run!, ct);
+            return Results.Ok(new PublishedDto(token, contribution.Owned, contribution.Total));
         });
+
+        // At most 576 cells whatever is behind it, which is the whole reason the merge happens
+        // on publish rather than here.
+        api.MapGet("/archive", async (ICommunityArchive community, CancellationToken ct) =>
+            Results.Ok(CommunityDto.From(await community.ListAsync(ct))));
 
         // Anonymous and public by design. Anything reachable by token is public, so nothing
         // goes into a run record that would embarrass somebody if scraped.

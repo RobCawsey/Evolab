@@ -233,13 +233,13 @@ and how to drive it; it does not know what a population is.
 | 5 | [The stepper](#slice-5--the-stepper) | 3 | **complete** |
 | 6 | [Guided first run](#slice-6--guided-first-run) | 2 | **complete** |
 | 7 | [Body editor](#slice-7--body-editor) | 3 | **complete** |
-| 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | next |
-| 9 | 3D replay | 3 | sketch |
-| 10 | Gait analysis | 2 | sketch |
-| 11 | Challenge track | 3 | sketch |
-| 12 | The server | 3 | sketch |
-| 13 | Community archive | 2 | sketch |
-| 14 | Task suite | 3 | sketch |
+| 8 | [Behaviour archive](#slice-8--behaviour-archive) | 2 | **complete** |
+| 9 | [3D replay](#slice-9--3d-replay) | 3 | **complete** |
+| 10 | [Gait analysis](#slice-10--gait-analysis) | 2 | **complete** |
+| 11 | [Challenge track](#slice-11--challenge-track) | 3 | **complete** |
+| 12 | [The server](#slice-12--the-server) | 3 | **complete** |
+| 13 | [Community archive](#slice-13--community-archive) | 1 | **complete** |
+| 14 | Task suite | 3 | next |
 
 **Slices 0–3 are the spine.** They end with a genetic algorithm evolving a gait while you
 watch a fitness curve climb. Everything after slice 3 is enrichment and can be reordered or
@@ -2367,17 +2367,202 @@ collide with a C# folder and is obviously not source.
 
 ---
 
-## Slices 13–14 — Later stages
+## Slice 13 — Community archive
 
-Sketches only. Each will be written out fully at the end of the slice before it.
+> **Status: built.** One session. §5's last two endpoint rows, and the one idea §15 says is
+> worth taking out of the classroom feature.
 
-| # | Name | Shape of the work |
-|---|---|---|
-| 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |
-| 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |
+### Goal
+
+Publishing a run contributes its elites to a shared grid, and the behaviour map gains a
+**Mine / Everyone** toggle. A solo learner sees the space of gaits found by everyone who came
+before them, next to the handful their own run found.
+
+§15 makes the argument: *"thirty people's elites merged into one grid, showing that the room
+found six genuinely different ways of walking."* Decoupled from a cohort it needs no roster, no
+accounts and no minors — a genome is eleven numbers and carries no personal data at all.
+
+**It worked the first time it was pointed at real data, and the numbers are the slice.** One
+published run put 244 cells in the map. A second run at a different seed found 83 cells of its
+own, **36 of which the first run had already found** — so 47 were new, and 208 of the shared
+244 were ways this search never discovered. That is quality–diversity stated in two integers,
+and no amount of explanation lands it as well.
+
+### The merge happens on publish, and that is a bound rather than a preference
+
+Merging **on read** does not survive arithmetic: each run stores up to 576 cells, so 200
+published runs is 115,000 rows to reduce on every page load to produce at most 576. Merging **in
+the browser** — the sketch's phrasing, and attractive because `archiveMerge` already exists —
+fails on the same arithmetic from the other end.
+
+So the community archive is **a stored thing, not a query result**: one table keyed by grid
+index, so it physically cannot exceed 576 rows however many runs are published. §5's endpoint
+table already said so — `POST /api/runs/{id}/publish` is described as *"mint a share token,
+contribute elites to the community archive"*, one action with two effects.
+
+Measured: 244 cells is a **78 kB** response, so a full grid tops out around 185 kB, fetched once
+when Everyone is first selected.
+
+### `archiveInsert` is written twice, and only one test can tell
+
+`CommunityArchive.ContributeAsync` is the insertion rule in C#: *higher fitness wins, ties keep
+the incumbent*. That is a real cost, and the response is a test rather than an architecture.
+
+**The tie is the case worth pinning**, and mutation-testing showed exactly who catches it.
+Changing `>=` to `>` fails `A_tie_keeps_the_incumbent` in `CommunityRepositoryTests` — and
+leaves the endpoint-level tie test green, because the fake carries its own copy of the rule.
+Fakes agree with whatever you tell them.
+
+The tie direction is also what makes republishing a no-op: a run's own cells tie with
+themselves, so a second publish changes nothing.
+
+### Contribution is reported as ownership, not as a delta
+
+Which follows from the above. Publishing twice returns the same token and must report the same
+contribution — and a delta cannot, because the second call changes nothing and the honest delta
+is zero.
+
+So the number is **how many shared cells this run currently owns**, out of how many the map
+holds: *"This run holds 62 of the 294 cells in the shared behaviour map."* Verified idempotent
+by clicking Share twice and reading the same sentence.
+
+### The stored index is authoritative, and finding out cost a cell
+
+`buildCommunity` first re-derived each cell's bin from the stride and duty beside it. 244 cells
+arrived and **243 appeared on screen**.
+
+`serialise.ts` rounds the behaviour to four decimals for the wire. A stride of 0.87499 is stored
+as 0.8750, which is exactly a bin boundary at 24 bins over 0–1.4 — it re-derives one column to
+the right and lands on its neighbour. One cell silently lost, and it would have been thousands
+on a full map.
+
+**A bin is decided once, from the full-precision behaviour, when the cell is claimed.** The same
+family as `IslandConfig.trialSeed`: if a decision survives, the conditions it was made under
+must not change. `archiveInsert` now delegates to a new `archivePlace`, which takes the index
+rather than deriving it, so the tie-breaking rule is still written exactly once and the golden
+6.4598 is unchanged.
+
+`archiveMerge` still re-derives, and that is safe: its inputs are in-memory archives whose
+behaviours were never rounded.
+
+### Everyone mode is the same canvas, and your cells are outlined
+
+The toggle swaps which `Archive` `drawArchive` is handed. Same grid, same axes, same colour
+ramp, same click-to-load. `drawArchive` gained one optional `ReadonlySet<number>` of indices to
+outline — not a notion of *community*, which it does not need.
+
+The outline is `overlapOf(mine, theirs)`, computed in the browser from the two archives it
+already has, so it needs no provenance at all. Adjacent marked cells share edges and read as one
+outlined region, which is the better picture: your run occupies a patch of the space rather than
+a scatter of dots.
+
+**The repaint key includes the pool's revision in both scopes.** The first version keyed the
+shared map on a constant, on the grounds that it never changes on its own — and the outline over
+it then sat frozen at whatever it was when the map was fetched, while the search underneath it
+kept finding cells. The caption counts the same cells and refreshes with them.
+
+### A genome only means something against a body
+
+Slice 7 fixed the topology at six joints so a gait could be dropped onto a different set of
+legs. Here it happens with somebody else's robot, so a community cell carries its run's
+`BodySpec` and clicking one says which case it is:
+
+- same body → *"Loaded. Same body as yours, so it should behave as it did for them."*
+- different → *"…The genome is eleven numbers and it does not know how long your legs are, so on
+  this robot it may not walk at all"*, with a button that adopts their body.
+
+Both verified by hand. Loading their body silently would throw away the reader's own edits;
+saying nothing would make the app look broken at the exact moment it is being most instructive.
+
+### `EnsureCreated` does not upgrade, and 30 passing tests could not say so
+
+**The most instructive failure in the slice, and the same shape as slice 12's.**
+
+`EnsureCreated` builds the schema only when the database file does not exist. The new table
+never appeared in the database slice 12 had created, so every `GET /api/archive` returned
+`SQLite Error 1: 'no such table'` — while all 30 tests passed, because every test builds its
+database from scratch.
+
+> Slice 12: **fakes prove endpoint behaviour and cannot prove persistence behaviour.**
+> Slice 13: **a database built fresh in a test cannot prove upgrade behaviour.** The tests
+> create the world as it should be; reality arrives as it already is.
+
+Full migrations do not fit: a database created by `EnsureCreated` has no
+`__EFMigrationsHistory`, so `Migrate()` would try to create tables that are already there, and
+baselining that is more machinery than one SQLite file on one machine has earned. `Schema.cs`
+creates missing tables from **the model's own create script**, so it cannot drift from the
+entity classes the way a hand-copied `CREATE TABLE` would. Its limit is stated in the file: it
+adds tables, and will not add a column, drop one or change a type. The day one of those is
+needed is the day §5's *"revisit when there are two of anything"* has actually arrived.
+
+Two tests: one drops the table to age the database backwards and asserts the failure and then
+the fix; one runs the step twice, because it runs on every startup and has to be idempotent
+rather than merely harmless once.
+
+### A dead control is worse than a failing one
+
+The Everyone button was disabled when the fetch failed. That turned a transient failure into a
+permanently dead control — nothing else retries, so once the server came back there was no way
+to reach the shared map short of a reload. It stays enabled and clicking it retries, with the
+reason in the note and in the title. **A failure that can fix itself needs an affordance that
+can act on it.**
+
+### Measured
+
+```
+POST publish          244 cells contributed, then +50 from a second run → 294
+                      republish: identical 62 / 294, no churn
+GET  /api/archive     78 kB for 244 cells — ~185 kB at a full grid
+overlap               seed 777: 36 of 244    seed 31: 100 of 294
+server killed         30 generations, 0 unhandled rejections, 1 amber dot,
+                      toggle falls back to Mine and retries when clicked
+tests                 255 Node, 30 .NET
+golden                6.4598
+```
+
+### Done when
+
+- [x] Publishing contributes elites; publishing again changes nothing and reports the same
+      numbers.
+- [x] `GET /api/archive` returns at most 576 cells however many runs are published.
+- [x] The map toggles Mine / Everyone; Everyone outlines the cells your run also fills and says
+      how many.
+- [x] Clicking a community cell loads the gait, and names the body difference when there is one.
+- [x] The C# insertion rule ties the same way `archiveInsert` does — mutation-tested, and only
+      the SQLite test catches it.
+- [x] The community repository has tests against real SQLite, not only against a fake.
+- [x] With the server stopped: the local map works, no unhandled rejection, no `try`/`catch`
+      outside `api.ts`. **Not** as specified — the toggle stays enabled and retries, because a
+      disabled control could never re-enable itself.
+- [x] The golden number is still 6.4598.
+
+### Deliberately not in this slice
+
+**No accounts and no attribution beyond a run title**, which goes in as a text node and an
+attribute value, never as markup.
+
+**No moderation, no rate limit, no deletion.** One SQLite file on one machine with one user. The
+place to add them is `ContributeAsync`, and this note is the reminder.
+
+**No live updates.** The map is fetched when Everyone is first selected and after publishing.
+§10's amendment settles that polling is the answer if it is ever wanted.
+
+**No cross-body normalisation.** Comparing stride length between robots of different leg lengths
+is not meaningful, and a normalised axis would hide exactly the lesson the body warning teaches.
+
+**Still no trajectory upload.** Carried over from slice 12: the endpoint and content-addressed
+store exist and are tested, and nothing calls them.
 
 ---
 
+## Slice 14 — Task suite
+
+Sketch only. Will be written out fully at the end of slice 13.
+
+Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for
+short sessions.
+
+---
 ## Appendix A — Rapier notes
 
 Accumulated API facts. Add to this whenever something surprises you.

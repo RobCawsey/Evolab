@@ -79,3 +79,51 @@ public sealed class HistoryPoint
     public double Mean { get; set; }
     public double Diversity { get; set; }
 }
+
+/// <summary>
+/// One cell of the shared grid — slice 13. The fittest gait anybody has published that behaves
+/// this way.
+///
+/// <b>Not owned by a run, and everything it needs is copied into it.</b> The community archive
+/// is its own aggregate with its own lifetime: a foreign key to <see cref="ArchiveCell"/> would
+/// mean that deleting a run — which nothing does today and something might — silently punches
+/// holes in a map other people are looking at. The run title and body spec are denormalised for
+/// the same reason, and because listing the whole map is then one table scan with no join.
+///
+/// The grid index is the primary key, so the table physically cannot exceed 576 rows however
+/// many runs are published. That bound is the reason this is stored at all rather than merged
+/// from every run's cells on read.
+/// </summary>
+public sealed class CommunityCell
+{
+    /// <summary>Flat index into the 24 × 24 grid. Primary key: one row per cell, for ever.</summary>
+    public int Index { get; set; }
+
+    public Guid RunId { get; set; }
+    public string RunTitle { get; set; } = "";
+
+    /// <summary>
+    /// The body this gait was evolved on.
+    ///
+    /// Load-bearing rather than provenance. Slice 7 fixed the topology at six joints so a
+    /// genome could be dropped onto different legs; here that happens for real, and eleven
+    /// numbers that strode 0.92 m on their robot may be a face-plant on yours. The client
+    /// compares this against the body on screen and says which case it is.
+    /// </summary>
+    public string BodySpec { get; set; } = "";
+
+    public double Fitness { get; set; }
+    public double Stride { get; set; }
+    public double Duty { get; set; }
+    public string Genes { get; set; } = "";
+}
+
+/// <summary>
+/// What a publish did to the shared map: how many cells this run now owns, out of how many the
+/// map holds.
+///
+/// <b>Ownership, not a delta.</b> Publishing twice returns the same token and must therefore
+/// report the same contribution — and a delta cannot, because on the second call a run's own
+/// cells tie with themselves and ties lose, so nothing changes and the honest delta is zero.
+/// </summary>
+public sealed record Contribution(int Owned, int Total);

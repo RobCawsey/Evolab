@@ -107,7 +107,36 @@ export interface ArchiveCellDto {
   readonly fitness: number;
   readonly stride: number;
   readonly duty: number;
-  readonly genes: readonly number[];
+  /** Comma-separated, as `serialise.ts` writes them. */
+  readonly genes: string;
+}
+
+/* ---------------- the community archive — slice 13 ---------------- */
+
+/**
+ * One cell of the shared grid.
+ *
+ * `bodySpec` is not decoration. Slice 7 fixed the topology at six joints so a genome could be
+ * dropped onto different legs; a cell contributed by a run with longer shins is eleven numbers
+ * that strode 0.92 m *on that robot*, and may be a face-plant on the one currently on screen.
+ * The client compares this against the body being edited and says which case it is.
+ */
+export interface CommunityCellDto extends ArchiveCellDto {
+  readonly runTitle: string;
+  readonly bodySpec: string;
+}
+
+export interface CommunityDto {
+  readonly cells: readonly CommunityCellDto[];
+  /** Runs represented **in this map** — not runs ever published. */
+  readonly runs: number;
+}
+
+/** What publishing did: the link, and what the run now holds in the shared map. */
+export interface Published {
+  readonly token: string;
+  readonly owned: number;
+  readonly total: number;
 }
 
 export interface HistoryPointDto {

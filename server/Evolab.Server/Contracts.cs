@@ -16,6 +16,33 @@ public sealed record RunSummaryDto(
 }
 
 public sealed record ArchiveCellDto(int Index, double Fitness, double Stride, double Duty, string Genes);
+
+/// <summary>
+/// A cell of the shared grid — slice 13. Carries its run's title and body spec, because a
+/// genome only means something against a body and the client has to be able to say so.
+/// </summary>
+public sealed record CommunityCellDto(
+    int Index, double Fitness, double Stride, double Duty, string Genes,
+    string RunTitle, string BodySpec)
+{
+    public static CommunityCellDto From(CommunityCell c) =>
+        new(c.Index, c.Fitness, c.Stride, c.Duty, c.Genes, c.RunTitle, c.BodySpec);
+}
+
+/// <summary>
+/// <c>Runs</c> is how many runs are represented <em>in this map</em>, not how many have ever
+/// been published — a run whose every cell has since been beaten is not in the map, and saying
+/// otherwise would overstate what is on screen.
+/// </summary>
+public sealed record CommunityDto(IReadOnlyList<CommunityCellDto> Cells, int Runs)
+{
+    public static CommunityDto From(IReadOnlyList<CommunityCell> cells) => new(
+        cells.Select(CommunityCellDto.From).ToList(),
+        cells.Select(c => c.RunId).Distinct().Count());
+}
+
+/// <summary>The share token, and what publishing did to the shared map.</summary>
+public sealed record PublishedDto(string Token, int Owned, int Total);
 public sealed record HistoryPointDto(int Generation, double Best, double Mean, double Diversity);
 
 public sealed record RunDto(

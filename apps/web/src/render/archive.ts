@@ -21,6 +21,8 @@ const COLOURS = {
   label: '#5c5871',
   text: '#8c8899',
   hi: '#e9a13b',
+  /** Cells your own run also found, on the shared map — slice 13. */
+  mine: 'rgba(255, 255, 255, 0.5)',
 } as const;
 
 const PAD = { left: 34, right: 10, top: 10, bottom: 26 };
@@ -58,13 +60,21 @@ export interface ArchiveView {
 
 let scratch: HTMLCanvasElement | null = null;
 
-/** Draw the map. Returns where the grid landed, so a click can be turned back into a cell. */
+/**
+ * Draw the map. Returns where the grid landed, so a click can be turned back into a cell.
+ *
+ * `outline` marks a set of cells — slice 13 hands it the indices your own run also fills, so
+ * the shared map shows where you sit inside it. It is a plain set of indices rather than a
+ * notion of *community*, because this function does not need one: it draws an archive, and the
+ * toggle decides which.
+ */
 export function drawArchive(
   ctx: CanvasRenderingContext2D,
   archive: Archive,
   width: number,
   height: number,
   highlight: number | null = null,
+  outline: ReadonlySet<number> | null = null,
 ): ArchiveView {
   const cols = archive.stride.bins;
   const rows = archive.duty.bins;
@@ -127,6 +137,29 @@ export function drawArchive(
     ctx.lineTo(plot.x + plot.w, y);
   }
   ctx.stroke();
+
+  // --- cells you also found ---
+  //
+  // Drawn before the champion ring so a cell that is both keeps the amber. Adjacent marked
+  // cells share edges and read as one outlined region, which is the better picture: your run
+  // occupies a patch of the space rather than a scatter of dots.
+  if (outline !== null && outline.size > 0) {
+    ctx.strokeStyle = COLOURS.mine;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const index of outline) {
+      if (index < 0 || index >= archive.cells.length) continue;
+      const col = index % cols;
+      const row = (index / cols) | 0;
+      ctx.rect(
+        Math.round(plot.x + col * cw) + 0.5,
+        Math.round(plot.y + (rows - 1 - row) * ch) + 0.5,
+        Math.round(cw),
+        Math.round(ch),
+      );
+    }
+    ctx.stroke();
+  }
 
   // --- the champion's cell, ringed ---
   if (best !== null) {

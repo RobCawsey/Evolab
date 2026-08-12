@@ -23,6 +23,16 @@ public interface IRunRepository
     Task<string?> PublishAsync(Guid id, CancellationToken ct);
 }
 
+/// <summary>
+/// The shared grid — slice 13. Two methods, because there are two things anyone does to it.
+/// </summary>
+public interface ICommunityArchive
+{
+    /// <summary>Fold a run's elites in, and report what it now owns.</summary>
+    Task<Contribution> ContributeAsync(Run run, CancellationToken ct);
+    Task<IReadOnlyList<CommunityCell>> ListAsync(CancellationToken ct);
+}
+
 public interface ITrajectoryStore
 {
     /// <summary>Store the buffer and return its content hash. Storing the same bytes twice is a no-op.</summary>
@@ -65,6 +75,68 @@ public sealed class RunRepository(EvolabContext db) : IRunRepository
         await db.SaveChangesAsync(ct);
         return run.ShareToken;
     }
+}
+
+public sealed class CommunityArchive(EvolabContext db) : ICommunityArchive
+{
+    /// <summary>
+    /// <b>This is <c>archiveInsert</c> written a second time, in another language.</b>
+    ///
+    /// That is a real cost and the honest response is a test rather than an architecture. The
+    /// rule in <c>packages/evolution/src/archive.ts</c> is <em>higher fitness wins, ties keep
+    /// the incumbent</em>, and the comparison below has to say exactly that. Ties are the case
+    /// worth pinning, because a tie resolved the other way would make the shared map disagree
+    /// with every local one in a way nobody would ever notice — and because republishing a run
+    /// is a tie against itself, so the direction decides whether publishing twice is a no-op or
+    /// a churn.
+    ///
+    /// The whole table is at most 576 rows, so it is loaded, folded and saved. No amount of
+    /// published runs changes that.
+    /// </summary>
+    public async Task<Contribution> ContributeAsync(Run run, CancellationToken ct)
+    {
+        var incumbents = await db.Community.ToDictionaryAsync(c => c.Index, ct);
+
+        foreach (var cell in run.Archive)
+        {
+            if (incumbents.TryGetValue(cell.Index, out var held))
+            {
+                if (held.Fitness >= cell.Fitness) continue;
+                held.RunId = run.Id;
+                held.RunTitle = run.Title;
+                held.BodySpec = run.BodySpec;
+                held.Fitness = cell.Fitness;
+                held.Stride = cell.Stride;
+                held.Duty = cell.Duty;
+                held.Genes = cell.Genes;
+                continue;
+            }
+
+            var claimed = new CommunityCell
+            {
+                Index = cell.Index,
+                RunId = run.Id,
+                RunTitle = run.Title,
+                BodySpec = run.BodySpec,
+                Fitness = cell.Fitness,
+                Stride = cell.Stride,
+                Duty = cell.Duty,
+                Genes = cell.Genes,
+            };
+            db.Community.Add(claimed);
+            // Kept in step so that two cells of the *same* run claiming one index resolve under
+            // the same rule as everything else, rather than by whichever came last.
+            incumbents[cell.Index] = claimed;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return new Contribution(
+            incumbents.Values.Count(c => c.RunId == run.Id),
+            incumbents.Count);
+    }
+
+    public async Task<IReadOnlyList<CommunityCell>> ListAsync(CancellationToken ct) =>
+        await db.Community.AsNoTracking().OrderBy(c => c.Index).ToListAsync(ct);
 }
 
 /// <summary>

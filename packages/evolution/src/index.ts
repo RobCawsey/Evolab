@@ -40,6 +40,7 @@ export type { GeneChange } from './operators.ts';
 export {
   createArchive,
   archiveInsert,
+  archivePlace,
   archiveIndex,
   archiveCoverage,
   archiveBest,

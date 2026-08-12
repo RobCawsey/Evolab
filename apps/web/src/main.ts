@@ -16,6 +16,7 @@ import {
   defaultGait,
   gaitPhase,
   Rng,
+  type Archive,
   type BipedSpec,
   type GaitParams,
 } from '@evolab/evolution';
@@ -52,6 +53,7 @@ import {
 } from './run/state.ts';
 import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
 import { api, reportFailure, reported } from './net/api.ts';
+import { buildCommunity, overlapOf, type Community } from './net/community.ts';
 import { createFailureIndicator, createRunsPanel } from './net/panel.ts';
 import { defaultTitle, runPayload } from './net/serialise.ts';
 import type { RunSummary } from './net/types.ts';
@@ -83,7 +85,8 @@ const stat = {
 };
 const arch = {
   cov: el('arch-cov'), pct: el('arch-pct'), best: el('arch-best'),
-  qd: el('arch-qd'), rate: el('arch-rate'),
+  qd: el('arch-qd'), rate: el('arch-rate'), note: el('arch-note'),
+  mine: el('arch-mine'), all: el('arch-all'),
 };
 const champ = {
   dist: el('c-dist'), upright: el('c-upright'), effort: el('c-effort'),
@@ -446,19 +449,30 @@ const editor = createEditor(el('editor'), {
     queueUrl();
   },
   onReset() {
-    spec = DEFAULT_SPEC;
-    morph = buildBiped(spec);
-    poolStale = true;
-    respawn();
-    stepper.retarget(morph);
-    editor.update(spec, state.champion !== null);
-    queueUrl();
+    applySpec(DEFAULT_SPEC);
   },
   onRetest() {
     stepper.retarget(morph);
     setMode('evolved');
   },
 });
+
+/**
+ * Replace the body wholesale — the reset button, and slice 13's "use the body it was evolved
+ * on". Distinct from the editor's `onChange`, which fires per slider tick and deliberately does
+ * not retarget the stepper mid-drag.
+ */
+function applySpec(next: BipedSpec): void {
+  spec = next;
+  morph = buildBiped(spec);
+  // Every fitness in the pool was measured on the old body, so it is marked stale and rebuilt
+  // on the next run rather than thrown away here.
+  poolStale = true;
+  respawn();
+  stepper.retarget(morph);
+  editor.update(spec, state.champion !== null);
+  queueUrl();
+}
 
 const guided = createGuided(el('guided'), {
   // Changing the goal changes what every island is scoring against, and islands take their
@@ -884,6 +898,15 @@ async function openSavedRun(id: string): Promise<void> {
   queueUrl();
 }
 
+/**
+ * Publish: one action, two effects — a read-only link, and this run's elites folded into the
+ * community archive (§5's endpoint table, slice 13).
+ *
+ * The number reported back is **ownership, not a delta**: how many shared cells this run holds
+ * now. Publishing twice returns the same token and therefore has to report the same
+ * contribution, and a delta cannot — the second call is a tie against itself, ties lose, and
+ * the honest delta is zero.
+ */
 async function shareRun(id: string): Promise<void> {
   const result = reported(await api.publishRun(id));
   if (!result.ok) {
@@ -892,7 +915,15 @@ async function shareRun(id: string): Promise<void> {
   }
   const link = `${location.origin}/?shared=${result.data.token}`;
   void navigator.clipboard?.writeText(link).catch(() => {});
-  runsPanel.note('Read-only link copied. Anyone with it can watch this gait.');
+
+  const { owned, total } = result.data;
+  runsPanel.note(
+    `Read-only link copied. This run holds ${owned} of the ${total} cells in the shared ` +
+    `behaviour map — switch the map to Everyone to see where.`,
+  );
+  // The shared map just changed, so anything cached is now wrong.
+  community = null;
+  if (archiveScope === 'all') void loadCommunity();
   await refreshRuns();
 }
 
@@ -1037,25 +1068,175 @@ let archiveView: ArchiveView | null = null;
 let archivePainted = -1;
 let archiveHover: number | null = null;
 
+/* ---------------- Mine / Everyone — slice 13 ---------------- */
+
+/**
+ * Which map the panel is showing. `mine` is this session's search; `all` is the shared grid
+ * every published run has contributed to.
+ *
+ * The toggle swaps which `Archive` the renderer is handed and nothing else. A second
+ * visualisation would teach that these are two different kinds of thing, and they are not — one
+ * is a merge of many of the other.
+ */
+let archiveScope: 'mine' | 'all' = 'mine';
+let community: Community | null = null;
+let communityLoading = false;
+
+/** The default copy, captured before anything overwrites it. */
+const archNoteMine = arch.note.innerHTML;
+
+/**
+ * True while the note is saying something about a cell that was clicked.
+ *
+ * The shared map's caption counts your outlined cells and therefore refreshes as the search
+ * fills them in — which would otherwise wipe "this gait was evolved on a different body" a
+ * fraction of a second after it appeared.
+ */
+let archiveMessageShown = false;
+
+function setArchNote(html: string): void {
+  arch.note.innerHTML = html;
+  archiveMessageShown = false;
+}
+
+/**
+ * A message about a specific cell, built from nodes rather than markup.
+ *
+ * The run title is somebody else's text. It goes in as a text node and never near a parser —
+ * the same rule the saved-runs list already follows.
+ */
+function setArchMessage(text: string, action?: { label: string; run(): void }): void {
+  arch.note.replaceChildren(document.createTextNode(text));
+  archiveMessageShown = true;
+  if (!action) return;
+  const button = document.createElement('button');
+  button.className = 'wide ghost';
+  button.style.marginTop = '8px';
+  button.textContent = action.label;
+  button.addEventListener('click', action.run);
+  arch.note.append(button);
+}
+
+/** The archive currently on screen, and null when the one asked for is not available. */
+function shownArchive(): Archive | null {
+  if (archiveScope === 'all') return community?.archive ?? null;
+  return state.pool?.archive ?? null;
+}
+
+async function loadCommunity(): Promise<void> {
+  if (communityLoading) return;
+  communityLoading = true;
+  const result = reported(await api.getCommunity());
+  communityLoading = false;
+
+  if (!result.ok) {
+    // No server is a normal state, not an error state — every other panel behaves this way and
+    // this one does too. Fall back to the local map and say why in one line.
+    //
+    // **The button is not disabled.** The first version disabled it, which turned a transient
+    // failure into a permanently dead control: nothing else here retries, so once the server
+    // came back there was no way to reach the shared map short of a reload. A failure that can
+    // fix itself needs an affordance that can act on it.
+    archiveScope = 'mine';
+    syncScopeButtons();
+    arch.all.title = 'The server is not answering — click to try again';
+    setArchNote(
+      'The shared map needs the server, and it is not answering. Click Everyone again to ' +
+      'retry. Everything else here still works — evolution never leaves the browser.',
+    );
+    archivePainted = -1;
+    return;
+  }
+
+  community = buildCommunity(result.data.cells, result.data.runs);
+  archivePainted = -1;
+  paintCommunityNote();
+}
+
+function paintCommunityNote(): void {
+  if (community === null) return;
+  const shared = overlapOf(state.pool?.archive ?? null, community.archive);
+  const filled = community.archive.filled;
+
+  if (filled === 0) {
+    setArchNote(
+      'Nobody has published a run yet, so the shared map is empty. Save a run and share it, ' +
+      'and its elites land here.',
+    );
+    return;
+  }
+
+  const runs = `${community.runs} published ${community.runs === 1 ? 'run' : 'runs'}`;
+  const yours = shared.size === 0
+    ? 'Your run has not reached any of them yet.'
+    : `Outlined: the ${shared.size} your own run also found.`;
+  setArchNote(
+    `Every kind of gait anybody has published, merged into one grid — ${filled} cells from ` +
+    `${runs}. ${yours} Click a cell to load that gait.`,
+  );
+}
+
+function syncScopeButtons(): void {
+  arch.mine.classList.toggle('on', archiveScope === 'mine');
+  arch.all.classList.toggle('on', archiveScope === 'all');
+  arch.all.title = 'The merged map of every published run';
+}
+
+function setArchiveScope(scope: 'mine' | 'all'): void {
+  if (archiveScope === scope) return;
+  archiveScope = scope;
+  archiveHover = null;
+  archivePainted = -1;
+  syncScopeButtons();
+
+  if (scope === 'mine') {
+    setArchNote(archNoteMine);
+    return;
+  }
+  if (community === null) {
+    setArchNote('Fetching the shared map…');
+    void loadCommunity();
+  } else {
+    paintCommunityNote();
+  }
+}
+
+arch.mine.addEventListener('click', () => setArchiveScope('mine'));
+arch.all.addEventListener('click', () => setArchiveScope('all'));
+
 function paintArchive(): void {
-  const pool = state.pool;
-  if (!pool) return;
+  const a = shownArchive();
+  if (!a) return;
   // The map is not present in the guided flow, where the canvas measures zero. Painting a
   // zero-width canvas is harmless and pointless; skipping also means the first paint after
   // switching to Explorer happens at the right size rather than being cached at 24 pixels.
   if (archiveCanvas.clientWidth === 0) return;
 
-  // Repaint on a cell change, a resize, or a hover move — not on every frame. At four
-  // workers the map changes a few times a second and the replay runs at sixty, so this is
-  // the difference between one blit a second and sixty.
-  const revision = pool.archiveRevision * 4096 + (archiveHover ?? 4095);
+  // Repaint on a cell change, a resize, a hover move or a scope change — not on every frame.
+  // At four workers the map changes a few times a second and the replay runs at sixty, so this
+  // is the difference between one blit a second and sixty.
+  //
+  // The pool's revision is in the key for *both* scopes. The shared map never changes on its
+  // own, but the outline over it is your own map, so a running search has to redraw it — the
+  // first version keyed the shared map on a constant and the outline sat frozen at whatever it
+  // was when the map was fetched.
+  const poolRevision = state.pool?.archiveRevision ?? 0;
+  const revision =
+    (poolRevision * 2 + (archiveScope === 'all' ? 1 : 0)) * 4096 + (archiveHover ?? 4095);
   if (revision !== archivePainted) {
     const rect = archiveCanvas.getBoundingClientRect();
-    archiveView = drawArchive(actx, pool.archive, rect.width, rect.height, archiveHover);
+    // Only the shared map is outlined: on your own map every filled cell is yours, and
+    // outlining all of them would say nothing.
+    const outline = archiveScope === 'all' && community
+      ? overlapOf(state.pool?.archive ?? null, community.archive)
+      : null;
+    archiveView = drawArchive(actx, a, rect.width, rect.height, archiveHover, outline);
+    // The caption counts the same outlined cells, so it moves with them rather than staying at
+    // whatever it said when the map arrived.
+    if (archiveScope === 'all' && !archiveMessageShown) paintCommunityNote();
     archivePainted = revision;
   }
 
-  const a = pool.archive;
   const best = a.filled > 0 ? Math.max(...a.cells.map((c) => c?.fitness ?? 0)) : 0;
   arch.cov.textContent = a.filled === 0
     ? 'nothing yet'
@@ -1065,22 +1246,35 @@ function paintArchive(): void {
   arch.qd.textContent = a.filled > 0 ? archiveQd(a).toFixed(1) : '—';
   // Improvements per offer. It falls steadily through a run, and watching it fall is a
   // clearer signal that the search has stopped exploring than a flat best-fitness line —
-  // best fitness can sit still while the map is still filling.
-  arch.rate.textContent = a.attempts > 0
-    ? `${((a.improvements / a.attempts) * 100).toFixed(0)}% of trials`
-    : '—';
+  // best fitness can sit still while the map is still filling. Meaningless on a merged map,
+  // where the offers happened in other people's browsers.
+  arch.rate.textContent = archiveScope === 'all'
+    ? '—'
+    : a.attempts > 0 ? `${((a.improvements / a.attempts) * 100).toFixed(0)}% of trials` : '—';
+}
+
+function archiveHitAt(e: MouseEvent): ReturnType<typeof cellAt> {
+  const a = shownArchive();
+  if (!a || !archiveView) return null;
+  const rect = archiveCanvas.getBoundingClientRect();
+  return cellAt(a, archiveView, e.clientX - rect.left, e.clientY - rect.top);
 }
 
 archiveCanvas.addEventListener('mousemove', (e) => {
-  const pool = state.pool;
-  if (!pool || !archiveView) return;
-  const rect = archiveCanvas.getBoundingClientRect();
-  const hit = cellAt(pool.archive, archiveView, e.clientX - rect.left, e.clientY - rect.top);
+  const hit = archiveHitAt(e);
   archiveHover = hit?.index ?? null;
-  archiveCanvas.title = hit
-    ? `stride ${hit.cell.behaviour[0].toFixed(2)} m · duty ${hit.cell.behaviour[1].toFixed(2)}` +
-      ` · fitness ${hit.cell.fitness.toFixed(3)} · found at generation ${hit.cell.generation}`
-    : '';
+  if (!hit) {
+    archiveCanvas.title = '';
+    return;
+  }
+  const where =
+    `stride ${hit.cell.behaviour[0].toFixed(2)} m · duty ${hit.cell.behaviour[1].toFixed(2)}` +
+    ` · fitness ${hit.cell.fitness.toFixed(3)}`;
+  // A generation number means nothing across runs, so the shared map names the run instead.
+  const origin = archiveScope === 'all' ? community?.origins.get(hit.index) : undefined;
+  archiveCanvas.title = archiveScope === 'all'
+    ? `${where}${origin ? ` · from "${origin.runTitle}"` : ''}`
+    : `${where} · found at generation ${hit.cell.generation}`;
 });
 
 archiveCanvas.addEventListener('mouseleave', () => {
@@ -1088,10 +1282,7 @@ archiveCanvas.addEventListener('mouseleave', () => {
 });
 
 archiveCanvas.addEventListener('click', (e) => {
-  const pool = state.pool;
-  if (!pool || !archiveView) return;
-  const rect = archiveCanvas.getBoundingClientRect();
-  const hit = cellAt(pool.archive, archiveView, e.clientX - rect.left, e.clientY - rect.top);
+  const hit = archiveHitAt(e);
   if (!hit) return;
 
   // Loading a cell into the sliders rather than into a fourth replay mode. It reuses the
@@ -1102,6 +1293,35 @@ archiveCanvas.addEventListener('click', (e) => {
   panel.sync(state.manualGait);
   setMode('manual');
   queueUrl();
+
+  if (archiveScope !== 'all') return;
+
+  /*
+    A genome only means something against a body, and this is where that bites.
+
+    Slice 7 fixed the topology at six joints so a gait could be dropped onto a different set of
+    legs. Here it happens with somebody else's robot: eleven numbers that strode 0.92 m on their
+    biped may be a face-plant on this one. That is not a defect to hide — it is the coupling
+    between body and controller, demonstrated rather than described — but it has to be *said*,
+    or the app looks broken at the exact moment it is being most instructive.
+  */
+  const origin = community?.origins.get(hit.index);
+  const theirs = origin?.bodySpec ?? '';
+  if (theirs === '' || theirs === encodeSpec(spec)) {
+    setArchMessage('Loaded. Same body as yours, so it should behave as it did for them.');
+    return;
+  }
+  setArchMessage(
+    'Loaded — but this gait was evolved on a different body. The genome is eleven numbers ' +
+    'and it does not know how long your legs are, so on this robot it may not walk at all.',
+    {
+      label: 'Use the body it was evolved on',
+      run: () => {
+        applySpec(clampSpec(decodeSpec(theirs, DEFAULT_SPEC)));
+        setArchMessage('Their body loaded. Press Run to evolve from here, or edit it back.');
+      },
+    },
+  );
 });
 
 function paintStats(): void {

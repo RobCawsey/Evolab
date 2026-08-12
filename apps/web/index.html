@@ -145,6 +145,21 @@
       .ph em { font-style: normal; color: var(--faint); letter-spacing: 0; text-transform: none; font-size: 11px; }
       .ph .sp { flex: 1; }
 
+      /*
+        A two-state switch inside a panel header — slice 13's Mine / Everyone. Small enough to
+        sit in a 28px bar, and the buttons are written without whitespace between the tags
+        because inline-block siblings would otherwise be separated by a text node.
+      */
+      .seg { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+      .seg button {
+        border: 0; background: transparent; color: var(--faint); cursor: pointer;
+        font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+        padding: 0 7px; height: 17px; line-height: 17px;
+      }
+      .seg button:hover:not(:disabled) { color: var(--text); }
+      .seg button.on { background: var(--line); color: var(--text); }
+      .seg button:disabled { opacity: .35; cursor: not-allowed; }
+
       /* sliders */
       .sl-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
       .sl-head {
@@ -610,9 +625,15 @@
         <div class="ph lab-only">Islands<span class="sp"></span><em>ring · 2 elites every 5 gens</em></div>
         <div class="stats lab-only" id="islands"></div>
 
-        <div class="ph explorer-only">Behaviour map<span class="sp"></span><em id="arch-cov">nothing yet</em></div>
+        <div class="ph explorer-only">Behaviour map<span class="sp"></span>
+          <div class="seg" id="arch-scope">
+            <button type="button" id="arch-mine" class="on">Mine</button
+            ><button type="button" id="arch-all">Everyone</button>
+          </div>
+        </div>
         <div class="arch-wrap explorer-only"><canvas id="archive"></canvas></div>
         <div class="stats explorer-only">
+          <div class="kv"><span>cells filled</span><b id="arch-cov">nothing yet</b></div>
           <div class="kv"><span>coverage</span><b id="arch-pct">—</b></div>
           <div class="kv"><span>best cell</span><b class="am" id="arch-best">—</b></div>
           <div class="kv lab-only"><span>quality–diversity</span><b id="arch-qd">—</b></div>

@@ -142,8 +142,35 @@ export function archiveInsert(
   fitness: number,
   generation = 0,
 ): boolean {
+  return archivePlace(archive, archiveIndex(archive, behaviour), genome, behaviour, fitness, generation);
+}
+
+/**
+ * The same offer, into a cell chosen by the caller rather than derived from the behaviour.
+ *
+ * `archiveInsert` is this with the binning done for you, and it is what almost everything
+ * wants. The exception is a cell that has been **stored and read back**: its bin was decided
+ * once, from the full-precision behaviour, at the moment it was claimed — and the stride and
+ * duty that travel beside it are rounded for display. Re-binning a rounded value can cross a
+ * boundary, which is not hypothetical: slice 13 lost a cell to it on the first real run, where
+ * a stride of 0.87499 was stored as 0.8750 and re-derived one column to the right, colliding
+ * with its neighbour.
+ *
+ * So the index is authoritative once it exists. The same family of rule as
+ * `IslandConfig.trialSeed` — if a decision survives, the conditions it was made under must not
+ * change. Kept as one function with `archiveInsert` so the tie-breaking rule cannot be written
+ * twice and drift.
+ */
+export function archivePlace(
+  archive: Archive,
+  index: number,
+  genome: Genome,
+  behaviour: readonly [number, number],
+  fitness: number,
+  generation = 0,
+): boolean {
   archive.attempts++;
-  const index = archiveIndex(archive, behaviour);
+  if (index < 0 || index >= archive.cells.length) return false;
   const incumbent = archive.cells[index] ?? null;
   if (incumbent !== null && incumbent.fitness >= fitness) return false;
 

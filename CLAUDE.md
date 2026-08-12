@@ -18,6 +18,40 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 13 — "Community archive".** Publishing a run contributes its elites to a shared 24 × 24
+grid, and the behaviour map gains a **Mine / Everyone** toggle. §5's last two endpoint rows, and
+the one idea §15 says is worth taking out of the classroom feature. The design document needed
+no amendment — the first slice where that is true.
+
+**The numbers are the slice.** One published run put 244 cells in the map; a second at a
+different seed found 83 of its own, **36 of which the first had already found**. So 47 were new,
+and 208 of the shared 244 were ways that search never discovered. Quality–diversity in two
+integers.
+
+**A bin is decided once, from the full-precision behaviour, when the cell is claimed.**
+`buildCommunity` first re-derived it from the stride and duty beside the cell, and 244 cells
+arrived while 243 appeared: `serialise.ts` rounds to four decimals, and 0.87499 stored as 0.8750
+is exactly a bin boundary, so it landed on its neighbour. `archiveInsert` now delegates to
+`archivePlace`, which takes the index rather than deriving it — one rule, still written once,
+golden 6.4598 unchanged. `archiveMerge` still re-derives and is safe, because its inputs were
+never rounded.
+
+**`EnsureCreated` does not upgrade, and 30 passing tests could not say so.** The new table never
+appeared in the database slice 12 had created, so every `GET /api/archive` was a 500 while every
+test passed — they all build a database from scratch. Slice 12's lesson, one level out: *fakes
+cannot prove persistence behaviour; a fresh database cannot prove upgrade behaviour.*
+`Schema.cs` creates missing tables from the model's own create script, so it cannot drift; its
+limit is new tables, and needing a column change is the day §5's "revisit" has arrived.
+
+**`archiveInsert` is written twice, in two languages, and only one test can tell.** Changing
+`>=` to `>` in `ContributeAsync` fails the SQLite tie test and leaves the endpoint tie test
+green — the fake carries its own copy of the rule. That tie direction is also what makes
+republishing a no-op, which is why contribution is reported as **ownership, not a delta**.
+
+**A dead control is worse than a failing one.** The Everyone button was disabled on failure,
+which made a transient outage permanent — nothing retries, so the shared map was unreachable
+without a reload. It stays enabled and clicking it retries.
+
 **Slice 12 — "The server".** One ASP.NET Core project (net9.0, not §5's net10) serving the
 built SPA at one origin, storing runs in SQLite and trajectories as content-addressed files.
 Save a run, list them, reopen one, publish a read-only `?shared=<token>` link.
@@ -224,12 +258,11 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 13 — the community archive. Sketched in
-[docs/implementation.md](docs/implementation.md#slices-1314--later-stages); write it out first.
+Next: slice 14 — the task suite. Sketched in
+[docs/implementation.md](docs/implementation.md#slice-14--task-suite); write it out first.
 
-It is the smallest slice left and most of it exists: `archiveMerge` already folds four island
-maps into one, and the only new part is that the maps arrive over HTTP rather than over
-`postMessage`. Slice 12 already stores every filled cell of every saved run.
+Eight terrain generators and a scorecard — a lot of small, independent work, so it suits short
+sessions. It is the last slice on the list, and nothing after it is planned.
 
 **§10 is amended, and it was wrong in every column of its bottom two rows.** Monitor mode is
 *view a finished run, read-only* — what `?shared=<token>` does, at any width — not the live
