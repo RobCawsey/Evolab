@@ -789,7 +789,8 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
 
 <section id="tasks">
   <div class="sechead"><p class="eyebrow">06 &mdash; Task suite</p>
-    <h2>Eight ways to fail</h2></div>
+    <h2>Eight ways to fail
+      <span class="tag t-no" style="vertical-align:middle;margin-left:8px">six, as built</span></h2></div>
   <div class="col stack">
     <p class="lede">Gaits evolved on flat ground are brittle in a way that is invisible until you
     test them. The trial suite exists to expose that: a genome is scored per task, and the
@@ -800,11 +801,14 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     <tbody>
       <tr><td>Sprint</td><td>20 m flat, 15 s limit</td><td>Mean forward velocity</td><td>Raw speed</td></tr>
       <tr><td>Endurance</td><td>200 m flat, no limit</td><td>Cost of transport</td><td>Efficiency, limit cycle stability</td></tr>
-      <tr><td>Rough</td><td>Perlin heightfield, ±4 cm</td><td>Distance before fall</td><td>Foot placement tolerance</td></tr>
+      <tr><td>Rough</td><td>Perlin heightfield, ±4 cm</td><td>Distance before fall</td><td>Foot placement tolerance
+        &nbsp;<span class="tag t-no">cut</span></td></tr>
       <tr><td>Incline</td><td>Ramps −12° to +18°</td><td>Summit time</td><td>Torque headroom, pitch control</td></tr>
       <tr><td>Steps</td><td>Four 12 cm risers</td><td>Steps cleared</td><td>Swing-height adaptation</td></tr>
-      <tr><td>Slalom</td><td>Six waypoint gates</td><td>Path efficiency</td><td>Steering, turn-in-place</td></tr>
-      <tr><td>Shove</td><td>Lateral impulses, 40–120 N·s</td><td>Recovery rate</td><td>Closed-loop reflex quality</td></tr>
+      <tr><td>Slalom</td><td>Six waypoint gates</td><td>Path efficiency</td><td>Steering, turn-in-place
+        &nbsp;<span class="tag t-no">cut</span></td></tr>
+      <tr><td>Shove</td><td>Lateral impulses, 40–120 N·s</td><td>Recovery rate</td><td>Closed-loop reflex quality
+        &nbsp;<span class="tag t-am">redefined</span></td></tr>
       <tr><td>Payload</td><td>+25% torso mass</td><td>Velocity retained</td><td>Robustness to model change</td></tr>
     </tbody>
   </table></div>
@@ -817,6 +821,53 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
     spawn, success predicate, metric expression. They load as data, so new tasks ship without a
     release and users can author their own in v1.1.</div>
   </div>
+
+  <div class="amend" style="margin-top:26px"><span class="lbl">Amended — slice 14</span>
+  <p><strong>Six tasks, not eight, and the heading above is wrong.</strong> Both cuts were forced
+  by measurement rather than taste, and neither was foreseeable when this section was written —
+  it predates the decision to keep the physics two-dimensional and it predates anyone running a
+  biped over a heightfield.</p>
+  <p><strong>Slalom cannot be built at all.</strong> It needs a lateral axis to put a gate beside
+  and a steering term to reach it; the simulation is sagittal and the genome is eleven numbers,
+  so nothing in the search could learn to pass one. Every gait would fail it identically, for a
+  reason that has nothing to do with the gait. §4 and §9 record the decision this follows from.
+  <strong>Shove survives by being redefined</strong>: <em>lateral</em> impulses have nowhere to
+  point, but a fore/aft one tests the same closed-loop recovery and tests it harder, because the
+  robot has to catch itself with the legs it has rather than by widening its stance.</p>
+  <p><strong>Rough was cut by its own numbers.</strong> It is the one profile that cannot be
+  expressed without seams, and a seamed ground costs more than roughness does. Over five
+  independently evolved gaits, flat ground gave a mean 3.80&nbsp;m and rough ground gave
+  1.70&nbsp;m at <em>zero</em> amplitude, 1.14&nbsp;m at 1&nbsp;cm and 1.15&nbsp;m at 3&nbsp;cm.
+  The seams cost about 2&nbsp;m and the terrain about half of one, so the task would have
+  reported the collider rather than the ground. A Rapier heightfield puts twenty contact points
+  under a 16&nbsp;cm foot where a cuboid puts two; replacing it with a chain of rotated cuboids
+  changed nothing, which is what identifies the seams rather than the contact count as the
+  cause. Ramps and steps avoid them — one rotated slab, and one slab per tread — and a 0° ramp
+  built that way measures identically to flat ground.</p>
+  <div class="pick" style="margin:14px 0"><strong>The rule that decided it.</strong> A task whose
+  own parameter barely moves its result is broken, not hard. Rough failed it, and so did the
+  first drafts of Incline and Shove — at &minus;12° to +18° and 40–120&nbsp;N&middot;s, four
+  of five gaits went nowhere and the numbers stopped meaning anything. They ship at 2° and
+  &minus;25&nbsp;N&middot;s, and every threshold in the suite was <em>calibrated</em> against
+  real gaits rather than chosen.</div>
+  <p><strong>Cost of transport is not measurable here</strong>, for the same reason
+  <span class="mono">TrialResult.effort</span> is joint travel rather than joules: Rapier's
+  JavaScript binding exposes no joint impulses, so the torque a motor actually applied cannot be
+  read back. Endurance reports <strong>joint travel per metre</strong>, which ranks gaits the way
+  CoT would for a position-controlled robot in units that are honest about what was measured. The
+  <span class="mono">CoT 0.31</span> printed in the Fig 9.7 and Fig 10.1 mockups is a number this
+  project cannot produce.</p>
+  <p>Of the Decision above, three parts of four survive. Terrain, spawn and thresholds are data;
+  <strong>the metric is a key into a record of functions, not an expression</strong>. Evolab has
+  no expression evaluator, and a parser and a sandbox to avoid a six-entry lookup table buys
+  nothing a task author cannot already get from the other fields while adding a new class of
+  runtime error.</p>
+  <p>What survives untouched is the part worth having, and it is the reason the section was
+  right to exist: <em>the scorecard, not the training fitness, is the artefact</em>. The
+  composite is the worst task rather than the average, so a sprint specialist still cannot buy a
+  gold with speed alone — and the reference champion, which scores 6.4598 on flat ground, comes
+  out <strong>bronze</strong>, held there by the one task where it falls every time. That is this
+  section's opening sentence, demonstrated.</p></div>
 </section>
 <section id="learn">
   <div class="sechead"><p class="eyebrow">07 &mdash; Learning design</p>

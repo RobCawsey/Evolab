@@ -18,6 +18,46 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 14 — "Task suite". The last slice on the list; nothing after it is planned.** Six tasks,
+five seeds each, on ground the gait was never evolved on. A scorecard panel under the behaviour
+map, and `npm run tasks` headless. §6 of the design document, **now amended** — the fifth
+amendment block and the one that changed the most.
+
+**§6 asked for eight tasks and two of them cannot exist.** Slalom needs a lateral axis to put a
+gate beside and a steering gene to reach it; the physics is sagittal, so every gait would fail it
+identically for a reason unrelated to the gait. Shove survives by being redefined as a fore/aft
+impulse. Then measurement took a second one — see below.
+
+**The gait that scores 6.4598 on flat ground is a bronze robot once tested**, held there by
+Steps, the one task where it falls every time. The composite is the worst task, not the average,
+so speed cannot buy it. That single line is §6's opening sentence demonstrated.
+
+**A segmented ground is not a floor, and that cut Rough.** A Rapier heightfield puts twenty
+contact points under a 16 cm foot where a cuboid puts two, and on *geometrically identical* flat
+ground five gaits went from a mean 3.80 m to 0.64 m with 5/5 falling. A chain of rotated cuboids
+— two points each — changed nothing, so it is the **seams**, not the count. Ramp and steps avoid
+them (one rotated slab; one slab per tread) and a 0° ramp measures 2.84 m against flat's 2.84 m.
+Rough cannot avoid them, and its amplitude then stops mattering: 1.70 m at 0 cm, 1.14 at 1 cm,
+1.15 at 3 cm. *A task whose own parameter barely moves its result is broken, not hard.*
+
+**"Geometrically identical" is not a safe refactor of physics setup.** Moving the ground's −0.5 m
+offset from the rigid body onto the collider moved the golden number to 5.8015. Flat ground is
+now an early return that reconstructs the original exactly, with the reason beside it.
+
+**Three flat-ground assumptions are gone**: `fallen` is height above the ground *beneath the
+torso*, contact is measured against `sim.groundAt(x)`, and stride and duty follow from contact.
+`terrain.ts` lives in `packages/evolution` — pure arithmetic, no Rapier — so `tasks.ts` can name
+a terrain without the search importing the simulator. `runSuite` takes an evaluator for the same
+reason, which is what stops the CLI and the browser running two copies that drift.
+
+**Thresholds are calibrated, not chosen** — `npm run tasks -- --calibrate`. Incline and Shove
+were re-tuned by that table rather than by taste. **Falling caps a badge at bronze**: the first
+scorecard printed `5/5 fell` and `GOLD` on the same line.
+
+The scorecard runs in a **second instance of `island.worker.ts`**, not a second worker file —
+Vite bundles per entry and `-compat` inlines Rapier's WASM into each. Its own worker because the
+pool is lazy, so a gait can be scored before anything has been evolved.
+
 **Slice 13 — "Community archive".** Publishing a run contributes its elites to a shared 24 × 24
 grid, and the behaviour map gains a **Mine / Everyone** toggle. §5's last two endpoint rows, and
 the one idea §15 says is worth taking out of the classroom feature. The design document needed
@@ -258,23 +298,15 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 14 — the task suite, **written out** in
-[docs/implementation.md](docs/implementation.md#slice-14--task-suite). The last slice on the
-list; nothing after it is planned.
+**Every slice on the list is built.** Slices 0–14, and nothing after 14 was ever planned. What
+remains is the list of things deliberately left out, each recorded in its slice's *Deliberately
+not in this slice* section — the largest being that nothing uploads a trajectory yet, carried
+from slice 12: the endpoint and content-addressed store exist and are tested, and nothing calls
+them.
 
-**It is seven tasks, not eight, and the work is not the terrain generators.** Slalom cannot be
-built — the physics is sagittal, so there is no lateral axis for a gate to be beside and no
-steering gene for the search to act on. Shove is redefined as a fore/aft impulse, which tests
-the same thing harder. §6 wants an amendment, the same shape as §4's and §9's.
-
-**Three things in `packages/sim` assume the ground is a plane at y = 0**: `fallen` is an absolute
-torso height, foot contact compares to zero, and stride and duty inherit it from contact. All
-three become ground-relative against one `groundHeightAt(x)`. Flat ground is terrain `[0, 0]`, so
-the acceptance test is that **6.4598 does not move**.
-
-Cost of transport is not measurable here for the reason `effort` is not joules, so Endurance
-reports joint travel per metre. Thresholds ship as placeholders and get calibrated against the
-reference champion — a task no gait can pass is a broken task, not a hard one.
+The five design-document amendments (§2, §4, §9, §10, §6) are the honest record of where the
+spec and the build disagreed. Three of them trace to one decision — the physics stayed 2D — and
+§6's second cut traces to a contact solver nobody could have predicted from a document.
 
 **§10 is amended, and it was wrong in every column of its bottom two rows.** Monitor mode is
 *view a finished run, read-only* — what `?shared=<token>` does, at any width — not the live

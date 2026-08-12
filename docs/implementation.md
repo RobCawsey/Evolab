@@ -239,7 +239,7 @@ and how to drive it; it does not know what a population is.
 | 11 | [Challenge track](#slice-11--challenge-track) | 3 | **complete** |
 | 12 | [The server](#slice-12--the-server) | 3 | **complete** |
 | 13 | [Community archive](#slice-13--community-archive) | 1 | **complete** |
-| 14 | Task suite | 3 | next |
+| 14 | [Task suite](#slice-14--task-suite) | 3 | **complete** |
 
 **Slices 0–3 are the spine.** They end with a genetic algorithm evolving a gait while you
 watch a fitness curve climb. Everything after slice 3 is enrichment and can be reordered or
@@ -2557,8 +2557,9 @@ store exist and are tested, and nothing calls them.
 
 ## Slice 14 — Task suite
 
-> **Status: specified.** Three sessions. §6 of the design document, which is the most completely
-> specified section in it and the one that has aged worst.
+> **Status: built.** Three sessions. §6 of the design document, which is the most completely
+> specified section in it and the one that has aged worst — **now amended**, the fifth such
+> block, and the one that changed the most.
 
 ### Goal
 
@@ -2595,8 +2596,9 @@ though the axis does not. A fore/aft impulse to the torso tests recovery from a 
 what "closed-loop reflex quality" means, and it is a harder test in the sagittal plane than a
 sideways one would be — the robot has to catch itself with the legs it actually has.
 
-So: **seven tasks, and §6 wants an amendment**, the same shape as §4's and §9's. Its title is
-"Eight ways to fail" and it will need a new one.
+So: **seven tasks at this point in the slice, and six by the end of it** — running the terrain
+is what took Rough as well. §6 is amended and its "Eight ways to fail" heading is tagged in
+place rather than rewritten, the same treatment §10's superseded rows got.
 
 ### Three things in `packages/sim` assume the ground is a plane at y = 0
 
@@ -2928,16 +2930,22 @@ composite badge.
 
 ### Done when
 
-- [ ] The golden number is still 6.4598 — flat ground is terrain `[0, 0]` and nothing else moved.
-- [ ] `groundHeightAt` and the collider are provably the same heights, with a test that samples
-      both.
-- [ ] A robot walks up an 18° ramp without being judged fallen, and down a 12° one without being
-      judged fine.
-- [ ] Seven tasks × five seeds produce a scorecard with a median and a spread per task.
-- [ ] Thresholds are calibrated against real gaits and the gaits are named in the notes.
-- [ ] The whole scorecard runs in under 5 seconds and never on the main thread.
-- [ ] Terrain trials do not reach the behaviour archive.
-- [ ] §6 is amended: seven tasks, Slalom cut with its reason, Shove redefined, CoT renamed.
+- [x] The golden number is still 6.4598 — flat ground keeps the exact collider it always had,
+      which turned out to matter: moving the same offset from the body to the collider is
+      geometrically identical and moved it to 5.8015.
+- [x] The collider and the height function agree. Ramp and steps are **exact** rather than
+      sampled — one rotated slab and one slab per tread — so the question does not arise for
+      them; `terrain.test.ts` pins the profiles and a 0° ramp against flat.
+- [x] A robot climbs and descends without the fall test firing on the slope rather than on the
+      robot. `fallen` is height above the ground beneath the torso.
+- [x] **Six** tasks × five seeds produce a scorecard with a median and a spread per task.
+      Seven was still one too many; Rough went the same way as Slalom, for a different reason.
+- [x] Thresholds are calibrated against five gaits, and the table they came from is above.
+- [x] 0.60 s headless, 0.43 s in the browser, in a worker of its own — never on the main thread.
+- [x] Terrain trials do not reach the behaviour archive: the suite calls `evaluateGait` directly
+      and no archive is involved anywhere in it.
+- [x] §6 is amended — six tasks, Slalom cut, Rough cut, Shove redefined, CoT renamed, and the
+      metric-expression decision reduced to the three parts of it that survive.
 
 ### Deliberately not in this slice
 
