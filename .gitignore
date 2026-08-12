@@ -3,3 +3,12 @@ dist/
 *.tsbuildinfo
 .vite/
 .DS_Store
+
+# .NET — slice 12. bin/ and obj/ are build output; data/ is the SQLite file and the
+# content-addressed trajectory blobs, which are runtime state and not source.
+bin/
+obj/
+server/.data/
+*.user
+# Vite writes the built SPA here for `dotnet publish` to pick up — build output, not source.
+server/Evolab.Server/wwwroot/
