@@ -10,7 +10,15 @@
  * longer need. `emigrants()` in `packages/evolution` already returns copies for this reason.
  */
 
-import { archiveInsert, type Archive, type GenerationSummary, type IslandConfig, type Morphology } from '@evolab/evolution';
+import {
+  archiveInsert,
+  type Archive,
+  type GaitParams,
+  type GenerationSummary,
+  type IslandConfig,
+  type Morphology,
+  type TrialResult,
+} from '@evolab/evolution';
 
 /**
  * Cells of an island's behaviour archive that changed since the last report.
@@ -50,7 +58,21 @@ export type ToWorker =
   | { readonly type: 'init'; readonly setup: IslandSetup }
   | { readonly type: 'run'; readonly untilGeneration: number }
   | { readonly type: 'pause' }
-  | { readonly type: 'immigrate'; readonly genomes: readonly Float32Array[] };
+  | { readonly type: 'immigrate'; readonly genomes: readonly Float32Array[] }
+  /**
+   * Put one gait through the task suite — slice 14.
+   *
+   * Carries its own morphology and needs no `init`, because the worker that answers this is a
+   * **second instance of the same worker file** rather than an island. Same chunk, so Rapier's
+   * inlined WASM is downloaded once and instantiated twice; a separate worker entry would have
+   * added a second 1.5 MB copy to the bundle (Appendix A).
+   */
+  | {
+      readonly type: 'scorecard';
+      readonly requestId: number;
+      readonly morphology: Morphology;
+      readonly gait: GaitParams;
+    };
 
 export type FromWorker =
   | { readonly type: 'ready'; readonly islandId: number; readonly initMs: number }
@@ -65,6 +87,13 @@ export type FromWorker =
     }
   | { readonly type: 'emigrants'; readonly islandId: number; readonly genomes: readonly Float32Array[] }
   | { readonly type: 'paused'; readonly islandId: number; readonly generation: number }
+  | {
+      readonly type: 'scorecard';
+      readonly requestId: number;
+      /** Task key → one `TrialResult` per seed. Thirty small objects; nothing to transfer. */
+      readonly results: Record<string, TrialResult[]>;
+      readonly ms: number;
+    }
   | { readonly type: 'error'; readonly islandId: number; readonly message: string };
 
 /** Buffers to hand to `postMessage`'s transfer list for a genome payload. */

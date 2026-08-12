@@ -2823,6 +2823,66 @@ Steps that says so — the one task where it falls every time. That single line 
 Sprint missing gold by 0.01 m/s is a coincidence and a good advertisement for the composite
 rule: the overall badge is the worst task, so nothing is bought with speed.
 
+### Session three: the panel, and one worker more
+
+The scorecard sits under the behaviour map in the right column: six rows, a badge each, a
+composite in the panel header, and one line of prose under it.
+
+**Explicit and on demand.** Slice 10 forbade its panels from re-running the simulation, and a
+test scans `render/gait/` to enforce it — a panel that simulates makes *looking* at a gait cost
+as much as evolving one. This slice exists to run trials, so the rule that replaces it is the
+button: a scorecard happens because somebody asked for it, never because a panel became visible.
+
+**A second instance of `island.worker.ts`, not a second worker file.** Vite bundles a worker per
+entry and `-compat` inlines Rapier's WASM into each one — Appendix A measured that at about
+1.5 MB. A separate entry would have added a third copy to the download to avoid one `case` in a
+`switch`. Another instance of the same file costs a second WASM instantiation in memory and
+nothing on the wire; the network panel shows all five workers requesting one URL.
+
+Its own worker rather than an island's for two reasons. The suite takes about half a second, and
+an island answering it would stall its own search for that long — but the load-bearing one is
+that **the pool is built lazily**, so a scorecard has to work before anything has been evolved.
+Verified: on a fresh page with no run at all, the default slider gait scores `fail 0/6` in
+0.24 s, which is both the right answer and the right moment to be told it.
+
+**A card must not outlive the gait it describes.** The body and the sliders are both editable
+while a scorecard is on screen, and a card beside a changed robot is a claim about something
+that no longer exists. A cheap signature — eleven genes plus the body's own numbers, summed once
+a frame — drops it and says so.
+
+**`runSuite` takes an evaluator**, exactly as `evolve(island, evaluate)` does, because invariant
+3 forbids `packages/evolution` importing the simulator. That is what stops the CLI and the
+browser running two copies of the suite that quietly drift; both call the same function and pass
+`evaluateGait`.
+
+#### The specificity trap, a third time
+
+The composite badge in the panel header came out grey. `.ph em` is more specific than
+`.bg-bronze`, so a `color` declared on the palette class loses — the same shape as `#archive`
+beating `.explorer-only` in slice 8 and `.gait.on` losing to its own media query in slice 10.
+
+Fixed by carrying the palette as **custom properties** rather than as colour declarations: the
+palette class only defines `--badge` and `--badge-bg`, and each consumer applies them at
+whatever specificity it needs. That is the general answer to this trap rather than a third
+one-off, and it is why the row badge and the header badge can share one palette at all.
+
+#### In the browser
+
+```
+Sprint      1.58 m/s              GOLD
+Endurance   6.36 rad/m            GOLD
+Incline     4.75 m    fell 2/5    GOLD
+Steps       2.71 m    fell 5/5    BRONZE
+Shove       1.97 m    fell 5/5    BRONZE
+Payload     4.80 m    fell 3/5    BRONZE
+
+bronze · 6/6 — 6 tasks × 5 seeds in 0.43 s
+```
+
+*"bronze overall, because it falls on Steps in 5 of 5 runs. The badge is the worst task, not the
+average — speed cannot buy it."* Naming the task holding the composite down is the actionable
+half of §6's rule: a reader told "bronze" learns nothing, and one told *why* knows what to fix.
+
 ### Five seeds, a median, and a spread — and a budget
 
 §6: *"a gait that clears the steps once in five is a gait that does not clear the steps."* Fixed,

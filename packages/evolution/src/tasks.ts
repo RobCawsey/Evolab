@@ -23,6 +23,7 @@
  * and running the trials is somebody else's job. Nothing in this file simulates anything.
  */
 
+import type { GaitParams } from './controller.ts';
 import type { Morphology } from './morphology.ts';
 import type { TerrainSpec } from './terrain.ts';
 import type { TrialResult } from './fitness.ts';
@@ -185,6 +186,51 @@ export function taskMorphology(morph: Morphology, task: Task): Morphology {
       s.id === 'torso' ? { ...s, density: s.density * task.torsoDensity! } : s,
     ),
   };
+}
+
+/**
+ * What running one trial takes. `evaluateGait` from `packages/sim` has exactly this shape.
+ *
+ * Passed in rather than imported, because invariant 3 says this package may not touch the
+ * simulator — the same arrangement `evolve(island, evaluate)` already uses. It also means the
+ * headless CLI and the browser worker run the suite through **one** implementation instead of
+ * two that drift.
+ */
+export type TaskEvaluator = (
+  morph: Morphology,
+  gait: GaitParams,
+  opts: {
+    readonly seed: number;
+    readonly seconds: number;
+    readonly terrain?: TerrainSpec;
+    readonly impulses?: readonly { readonly at: number; readonly x: number }[];
+  },
+) => TrialResult;
+
+/** Run every task across every seed. Deterministic: same gait, same body, same numbers. */
+export function runSuite(
+  morph: Morphology,
+  gait: GaitParams,
+  evaluate: TaskEvaluator,
+  tasks: readonly Task[] = TASKS,
+  seeds: readonly number[] = TASK_SEEDS,
+): Map<string, TrialResult[]> {
+  const byTask = new Map<string, TrialResult[]>();
+  for (const task of tasks) {
+    const body = taskMorphology(morph, task);
+    byTask.set(
+      task.key,
+      seeds.map((seed) =>
+        evaluate(body, gait, {
+          seed,
+          seconds: task.seconds,
+          ...(task.terrain ? { terrain: task.terrain } : {}),
+          ...(task.impulses ? { impulses: task.impulses } : {}),
+        }),
+      ),
+    );
+  }
+  return byTask;
 }
 
 export type Badge = 'fail' | 'bronze' | 'silver' | 'gold';

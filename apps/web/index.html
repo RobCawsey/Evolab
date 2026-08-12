@@ -160,6 +160,40 @@
       .seg button.on { background: var(--line); color: var(--text); }
       .seg button:disabled { opacity: .35; cursor: not-allowed; }
 
+      /* scorecard — slice 14 */
+      .sc-rows { display: flex; flex-direction: column; }
+      .sc-row {
+        display: grid; grid-template-columns: 1fr auto auto 52px;
+        align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .sc-row:last-child { border-bottom: 0; }
+      .sc-name { color: var(--dim); }
+      .sc-val { font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; }
+      .sc-spread { font-size: 10px; color: var(--bad); }
+      .sc-badge {
+        font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+        text-align: center; padding: 2px 0; border-radius: 2px;
+      }
+      /*
+        Badge colours, carried as custom properties rather than as colour declarations.
+
+        The palette has to apply in two places — a row badge and the `<em>` in a panel header —
+        and `.ph em` is more specific than `.bg-bronze`, so declaring `color` on the palette
+        class loses and the header badge came out grey. Custom properties sidestep it: the
+        palette class only *defines* the values, and each consumer applies them at whatever
+        specificity it needs. Same trap as `#archive` beating `.explorer-only` in slice 8.
+      */
+      .bg-gold { --badge: #e9a13b; --badge-bg: rgba(233, 161, 59, .18); }
+      .bg-silver { --badge: #c4c8d6; --badge-bg: rgba(196, 200, 214, .14); }
+      .bg-bronze { --badge: #c67c3c; --badge-bg: rgba(198, 124, 60, .16); }
+      .bg-fail { --badge: var(--bad); --badge-bg: rgba(214, 92, 92, .14); }
+      .sc-badge, .ph em[class^="bg-"] { color: var(--badge); background: var(--badge-bg); }
+      .ph em[class^="bg-"] {
+        padding: 1px 6px; border-radius: 2px; font-size: 10px;
+        font-family: var(--mono); letter-spacing: .06em;
+      }
+
       /* sliders */
       .sl-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
       .sl-head {
@@ -645,6 +679,7 @@
           the spread is what the search found rather than what it was told to look for. Click a
           cell to load that gait into the sliders.
         </div>
+        <div id="scorecard"></div>
         <div id="runs" class="explorer-only"></div>
 
         <div class="ph">Champion</div>

@@ -9,6 +9,7 @@
 import {
   DEFAULT_SPEC,
   archiveCoverage,
+  buildScorecard,
   archiveQd,
   buildBiped,
   clampSpec,
@@ -54,6 +55,8 @@ import {
 import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
 import { api, reportFailure, reported } from './net/api.ts';
 import { buildCommunity, overlapOf, type Community } from './net/community.ts';
+import { createScorecardPanel } from './ui/scorecard.ts';
+import { runScorecard } from './workers/scorecard.ts';
 import { createFailureIndicator, createRunsPanel } from './net/panel.ts';
 import { defaultTitle, runPayload } from './net/serialise.ts';
 import type { RunSummary } from './net/types.ts';
@@ -791,6 +794,81 @@ el('btn-challenges').addEventListener('click', () => {
   }
 });
 
+/* ---------------- the task suite — slice 14 ---------------- */
+
+/**
+ * Six tasks, five seeds each, on ground the gait was never evolved on.
+ *
+ * **On demand and never automatic.** Slice 10 forbade its panels from re-running the
+ * simulation, because a panel that simulates makes looking at a gait cost as much as evolving
+ * one. This one exists to run trials, so the rule that replaces it is the button: a scorecard
+ * happens because somebody asked for it.
+ *
+ * It runs in a worker of its own — see `workers/scorecard.ts` for why that is a second instance
+ * of the island worker rather than a second worker file.
+ */
+let scoring = false;
+
+const scorePanel = createScorecardPanel(el('scorecard'), () => void runSuiteNow());
+scorePanel.enable(true);
+
+/** The gait on screen: the champion when there is one, otherwise what the sliders say. */
+function gaitUnderTest(): GaitParams {
+  return state.champion ? state.champion.params : state.manualGait;
+}
+
+/**
+ * A cheap number that changes whenever the thing under test does.
+ *
+ * A scorecard describes one gait on one body, and both are editable while it is on screen —
+ * drag a slider and the card beside it becomes a claim about a robot that no longer exists.
+ * Summing the eleven genes and the body's own numbers is enough to notice, and costs nothing
+ * to do once a frame.
+ */
+function testSignature(): number {
+  const g = gaitUnderTest();
+  return g.frequency + g.balanceGain
+    + g.hip.amplitude + g.hip.phase + g.hip.centre
+    + g.knee.amplitude + g.knee.phase + g.knee.centre
+    + g.ankle.amplitude + g.ankle.phase + g.ankle.centre
+    + spec.torso.length + spec.torso.width
+    + spec.thigh.length + spec.shank.length
+    + spec.foot.length + spec.foot.height + spec.foot.ankleOffset
+    + spec.density;
+}
+
+/** The signature the card on screen was computed for, or null when there is no card. */
+let scoredSignature: number | null = null;
+
+/** Called once a frame. Drops a card that has stopped describing what is on screen. */
+function expireScorecard(): void {
+  if (scoredSignature === null || scoring) return;
+  if (Math.abs(testSignature() - scoredSignature) < 1e-9) return;
+  scoredSignature = null;
+  scorePanel.show(null, 0);
+  scorePanel.note('The gait changed. Test it again to see what this one is worth.');
+}
+
+async function runSuiteNow(): Promise<void> {
+  if (scoring) return;
+  scoring = true;
+  scorePanel.busy(true);
+  try {
+    const signature = testSignature();
+    const run = await runScorecard(morph, gaitUnderTest());
+    scoredSignature = signature;
+    scorePanel.show(buildScorecard(run.results), run.ms);
+  } catch (err) {
+    // Same contract as `api.ts`: a failure is something the panel says, not something that
+    // reaches the console or stops anything else working.
+    scorePanel.show(null, 0);
+    scorePanel.note(`Could not run the suite. ${String(err instanceof Error ? err.message : err)}`);
+  } finally {
+    scoring = false;
+    scorePanel.busy(false);
+  }
+}
+
 /* ---------------- the server, when there is one ---------------- */
 
 /**
@@ -1325,6 +1403,7 @@ archiveCanvas.addEventListener('click', (e) => {
 });
 
 function paintStats(): void {
+  expireScorecard();
   const pool = state.pool;
   const last = state.history[state.history.length - 1];
   const gen = pool && Number.isFinite(pool.generation) ? pool.generation : 0;

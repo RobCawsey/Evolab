@@ -116,6 +116,9 @@ export class IslandPool {
 
   private receive(message: FromWorker): void {
     if (this.disposed) return;
+    // A scorecard is not an island's business — it is answered by a worker of its own and
+    // routed by request id, so it never reaches the per-island bookkeeping below.
+    if (message.type === 'scorecard') return;
     const island = this.islands[message.islandId];
     if (!island) return;
 

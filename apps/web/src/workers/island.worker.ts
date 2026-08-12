@@ -13,11 +13,12 @@ import {
   createIsland,
   emigrants,
   immigrate,
+  runSuite,
   stepGeneration,
   type Genome,
   type Island,
 } from '@evolab/evolution';
-import { initPhysics, makeEvaluator } from '@evolab/sim';
+import { evaluateGait, initPhysics, makeEvaluator } from '@evolab/sim';
 import type { FromWorker, IslandSetup, ToWorker } from './protocol.ts';
 import { archiveTransferable, packArchiveDelta, transferable } from './protocol.ts';
 
@@ -122,6 +123,28 @@ ctx.onmessage = (event: MessageEvent<ToWorker>) => {
     case 'immigrate': {
       // The transferred buffers now belong to this worker, so they can be kept as-is.
       for (const g of message.genomes) mailbox.push(g);
+      return;
+    }
+
+    case 'scorecard': {
+      // Answered by a worker that was never `init`ed as an island, so it initialises Rapier
+      // for itself. `initPhysics` is idempotent, so an island worker could answer this too —
+      // it would just stall its own search for the half-second the suite takes.
+      void (async () => {
+        const started = performance.now();
+        await initPhysics();
+        try {
+          const byTask = runSuite(message.morphology, message.gait, evaluateGait);
+          post({
+            type: 'scorecard',
+            requestId: message.requestId,
+            results: Object.fromEntries(byTask),
+            ms: performance.now() - started,
+          });
+        } catch (err) {
+          post({ type: 'error', islandId: -1, message: String(err) });
+        }
+      })();
       return;
     }
   }

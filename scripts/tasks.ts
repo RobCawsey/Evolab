@@ -21,10 +21,9 @@ import {
   stepGeneration,
   TASK_SEEDS,
   TASKS,
-  taskMorphology,
+  runSuite,
   type Badge,
   type GaitParams,
-  type Task,
   type TrialResult,
 } from '../packages/evolution/src/index.ts';
 import { evaluateGait, initPhysics, makeEvaluator } from '../packages/sim/src/index.ts';
@@ -43,18 +42,6 @@ const morph = buildBiped(DEFAULT_SPEC);
 const seed = arg('seed', 4417);
 const gens = arg('gens', 30);
 
-/** Run one task across every seed. This is the only place the suite touches the simulator. */
-function runTask(gait: GaitParams, task: Task): TrialResult[] {
-  const body = taskMorphology(morph, task);
-  return TASK_SEEDS.map((s) =>
-    evaluateGait(body, gait, {
-      seed: s,
-      seconds: task.seconds,
-      ...(task.terrain ? { terrain: task.terrain } : {}),
-      ...(task.impulses ? { impulses: task.impulses } : {}),
-    }),
-  );
-}
 
 function gaitFromArgs(): GaitParams {
   const i = process.argv.indexOf('--gait');
@@ -104,7 +91,7 @@ if (has('calibrate')) {
     gaits.map((_, i) => `g${i}`.padStart(9)).join('') + '     median');
   for (const task of TASKS) {
     const medians = gaits.map((g) => {
-      const vs = runTask(g, task).map(METRICS[task.metric]).sort((a, b) => a - b);
+      const vs = runSuite(morph, g, evaluateGait, [task]).get(task.key)!.map(METRICS[task.metric]).sort((a, b) => a - b);
       return vs[vs.length >> 1]!;
     });
     const all = [...medians].sort((a, b) => a - b);
@@ -120,8 +107,7 @@ if (has('calibrate')) {
 /* ---------------- the scorecard ---------------- */
 
 const started = Date.now();
-const byTask = new Map<string, TrialResult[]>();
-for (const task of TASKS) byTask.set(task.key, runTask(gait, task));
+const byTask = runSuite(morph, gait, evaluateGait);
 const elapsed = (Date.now() - started) / 1000;
 
 const card = buildScorecard(byTask);
