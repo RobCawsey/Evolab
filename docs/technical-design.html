@@ -197,6 +197,20 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
   background:var(--a-pnl2);font-size:12px;font-family:var(--display);letter-spacing:.02em}
 .btn.pri{background:var(--a-am);border-color:var(--a-am);color:#17140C;font-weight:600}
 .btn.gh{background:transparent;color:var(--a-dim)}
+.errstate{border-bottom:1px solid var(--a-line)}
+.errstate:last-child{border-bottom:0}
+.errlabel{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--a-faint);margin:0;padding:10px 12px 2px}
+.errbody{font-family:var(--mono);font-size:11px;color:var(--a-faint);margin:0;padding:12px}
+.errdot{width:9px;height:9px;border-radius:50%;background:var(--a-am);flex:none}
+.errpop{width:330px;max-width:100%;margin:8px 12px 12px auto;padding:9px;border-radius:3px;
+  background:var(--a-pnl2);border:1px solid var(--a-line)}
+.errrow{padding:8px 2px;border-bottom:1px solid var(--a-line)}
+.errrow:last-of-type{border-bottom:0}
+.errrow .code{font-family:var(--mono);font-size:11px;color:var(--a-bad)}
+.errrow .when{font-family:var(--mono);font-size:10px;color:var(--a-faint)}
+.errrow p{margin:2px 0 0;font-size:11.5px;color:var(--a-tx);line-height:1.45}
+.errrow .meta{font-family:var(--mono);font-size:10px;color:var(--a-faint);margin-top:3px}
 .rail2{background:var(--a-pnl);border-right:1px solid var(--a-line);display:flex;flex-direction:column;
   align-items:center;gap:3px;padding:8px 0}
 .rail2 b{width:30px;height:30px;border-radius:4px;display:flex;align-items:center;justify-content:center;
@@ -1125,6 +1139,101 @@ figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-t
       ancestor can be replayed in place.</div>
       <div><span>4</span>Export writes a self-contained <span class="mono">.evolab</span> bundle;
       share publishes a read-only replay link.</div>
+    </div>
+  </figure>
+
+  <figure style="margin-top:44px">
+    <div class="mock"><div class="chrome"><div class="dots"><i></i><i></i><i></i></div>
+      <span class="path">evolab.app / project &middot; atlas-mk3 &mdash; three states of one indicator</span></div>
+      <div class="app" style="display:block">
+
+        <div class="errstate">
+          <p class="errlabel">1 &mdash; server healthy, or absent entirely</p>
+          <div class="tb" style="grid-column:auto">
+            <span class="brand">Evo<em>lab</em></span>
+            <button class="btn pri">Run</button>
+            <button class="btn">Reset</button>
+            <button class="btn">Challenges</button>
+            <span class="sp"></span>
+            <button class="btn gh">&ctdot;</button>
+          </div>
+          <p class="errbody">stage &middot; everything works, server or no server</p>
+        </div>
+
+        <div class="errstate">
+          <p class="errlabel">2 &mdash; an upload failed</p>
+          <div class="tb" style="grid-column:auto">
+            <span class="brand">Evo<em>lab</em></span>
+            <button class="btn pri">Run</button>
+            <button class="btn">Reset</button>
+            <button class="btn">Challenges</button>
+            <span class="sp"></span>
+            <span class="errdot" title="3 recent failures"></span>
+            <button class="btn gh">&ctdot;</button>
+          </div>
+          <p class="errbody">stage &middot; the run carries on regardless</p>
+        </div>
+
+        <div class="errstate">
+          <p class="errlabel">3 &mdash; the dot, clicked</p>
+          <div class="tb" style="grid-column:auto">
+            <span class="brand">Evo<em>lab</em></span>
+            <button class="btn pri">Run</button>
+            <button class="btn">Reset</button>
+            <button class="btn">Challenges</button>
+            <span class="sp"></span>
+            <span class="errdot"></span>
+            <button class="btn gh">&ctdot;</button>
+          </div>
+          <div class="errpop">
+            <div class="ph" style="height:24px;padding:0 2px;border-bottom:1px solid var(--a-line)">
+              Recent failures<span class="sp"></span><em>3</em></div>
+            <div class="errrow">
+              <div style="display:flex;justify-content:space-between;gap:8px">
+                <span class="code">upload_failed</span><span class="when">14:02:11</span></div>
+              <p>Could not save that run. It is still here &mdash; try again later.</p>
+              <div class="meta">500 &middot; trace 00-8f3c9a-01</div>
+            </div>
+            <div class="errrow">
+              <div style="display:flex;justify-content:space-between;gap:8px">
+                <span class="code">timeout</span><span class="when">14:01:58</span></div>
+              <p>The server took too long to answer.</p>
+              <div class="meta">0 &middot; no trace</div>
+            </div>
+            <div class="errrow">
+              <div style="display:flex;justify-content:space-between;gap:8px">
+                <span class="code">offline</span><span class="when">14:01:52</span></div>
+              <p>No connection. Evolving still works &mdash; nothing is being saved.</p>
+              <div class="meta">0 &middot; no trace</div>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:9px">
+              <button class="btn gh" style="flex:1">Copy details</button>
+              <button class="btn gh" style="flex:1">Dismiss</button>
+            </div>
+          </div>
+        </div>
+
+      </div></div>
+    <figcaption><b>Fig 9.9</b> How a server failure is reported &mdash; slice 12. The app never
+    stops working, so the report never interrupts.</figcaption>
+    <div class="notes">
+      <div><span>1</span>A working server looks exactly like no server: no badge, no tick, no
+      "connected" pill. Anything permanently on screen would imply the server matters more than
+      it does &mdash; &sect;5, and the rule that evolution never leaves the browser.</div>
+      <div><span>2</span>Amber, not red. Red already means <em>the robot fell</em>, which is a fact
+      about the simulation; a failed upload is not the same kind of news.</div>
+      <div><span>3</span>It lives in the toolbar because that is the only chrome surviving every
+      stage, both renderers and every breakpoint. Below 1000&nbsp;px the side panels become
+      drawers, and an indicator inside one would be invisible exactly when the connection is
+      worst.</div>
+      <div><span>4</span>Messages say what it means for the reader, not what broke. "It is still
+      here" is the load-bearing clause: nothing was lost. The <span class="mono">code</span>,
+      status and <span class="mono">traceId</span> sit underneath in mono, for the developer.</div>
+      <div><span>5</span>Copy details is the actual reporting affordance, and the reason
+      <span class="mono">traceId</span> is carried at all &mdash; it pairs a browser report with a
+      server log line.</div>
+      <div><span>6</span>No retry, and no dismissal on a timer. A failed upload can be re-sent from
+      the run itself; a retry here would need queue semantics nobody asked for.</div>
     </div>
   </figure>
 </section>

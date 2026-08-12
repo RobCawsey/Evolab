@@ -2332,8 +2332,8 @@ a pure function and gets tested in Node like everything else that matters: a wel
 
 #### Where the user sees it
 
-The toolbar already collapses into an overflow menu, so the indicator is a small dot next to
-it, hidden while the ring is empty. Clicking shows the last few — code, message, `traceId`,
+Drawn as **Fig 9.9** of the design document. The toolbar already collapses into an overflow
+menu, so the indicator is a small dot next to it, hidden while the ring is empty. Clicking shows the last few — code, message, `traceId`,
 and when. That is the whole reporting surface, and it is deliberately somewhere a learner
 never has to look.
 
