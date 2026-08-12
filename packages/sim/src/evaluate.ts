@@ -20,6 +20,7 @@ import {
 } from '@evolab/evolution';
 import { CONTROL_EVERY } from './control.ts';
 import { RECORD_HZ, createRecorder, type Recorder, type Recording } from './record.ts';
+import type { TerrainSpec } from './terrain.ts';
 import { Sim, TIMESTEP } from './world.ts';
 
 export interface TrialOptions {
@@ -37,6 +38,16 @@ export interface TrialOptions {
    * contact booleans being written anywhere.
    */
   readonly record?: boolean;
+  /**
+   * The ground. Absent means the flat floor, which is what the search always runs on.
+   *
+   * Terrain belongs to the task suite (slice 14), never to evolution: a population scored on
+   * bumpy ground is a different search, and the behaviour archive's descriptors were measured
+   * on flat.
+   */
+  readonly terrain?: TerrainSpec;
+  /** Fore/aft impulses at the torso, newton-seconds, applied at a time in seconds. */
+  readonly impulses?: readonly { readonly at: number; readonly x: number }[];
 }
 
 /** A trial that was asked to remember what it did. */
@@ -54,11 +65,16 @@ const DEFAULT_TILT_RANGE = 0.02;
  * not threshold-free, but it is stable well either side of the value picked. That gait lifts
  * its feet 58 mm and 135 mm, an order of magnitude clear of any of it.
  *
- * Deliberately not a collision-event subscription. The ground is a plane at y = 0 and stays
- * one until the challenge track in slice 14, so a geometry test on the snapshot the trial
+ * Deliberately not a collision-event subscription. A geometry test on the snapshot the trial
  * already takes is cheaper and far easier to reason about than draining an event queue.
- * Revisit when the floor stops being flat — an oriented box against a slope is still easy,
- * an oriented box against arbitrary terrain is not.
+ *
+ * Slice 14 is the "revisit when the floor stops being flat" this comment used to promise. The
+ * test is now against `sim.groundAt(x)` rather than against zero, which is the easy half of
+ * what was predicted: the lowest corner of an oriented box against a *locally* flat ground is
+ * the same arithmetic, evaluated at a different datum. The half that stays hard is a foot
+ * spanning a step edge, where the corner nearest the ground is not the lowest one — at a 2 cm
+ * sample spacing and a 12 cm riser that costs at most one frame of contact per step, which is
+ * below the threshold's own noise floor.
  */
 const CONTACT_EPSILON = 0.005;
 
@@ -112,7 +128,14 @@ export function evaluateGait(
 ): TrialResult | RecordedTrial {
   const steps = Math.round(opts.seconds / TIMESTEP);
   const tiltRange = opts.tiltRange ?? DEFAULT_TILT_RANGE;
-  const sim = new Sim(morph, { tilt: new Rng(opts.seed).range(-tiltRange, tiltRange) });
+  const sim = new Sim(morph, {
+    tilt: new Rng(opts.seed).range(-tiltRange, tiltRange),
+    ...(opts.terrain === undefined ? {} : { terrain: opts.terrain }),
+  });
+  // Impulses are consumed in order, so a task can queue several and each fires once. Compared
+  // against the step index rather than the clock so a trial stays bit-reproducible.
+  const impulses = opts.impulses ? [...opts.impulses].sort((a, b) => a.at - b.at) : [];
+  let nextImpulse = 0;
   const targets = new Map<string, number>();
   const previous = new Map<string, number>();
 
@@ -142,7 +165,8 @@ export function evaluateGait(
         const track = tracks.get(body.id);
         if (!track) continue;
         const down =
-          lowestCorner(body.y, body.angle, body.halfWidth, body.halfHeight) <= CONTACT_EPSILON;
+          lowestCorner(body.y, body.angle, body.halfWidth, body.halfHeight)
+          - sim.groundAt(body.x) <= CONTACT_EPSILON;
         // Rising edge only. A foot that stays down is one touchdown, not four hundred.
         if (down && !track.down && i > 0) track.touchdowns.push(snap.distance);
         if (down) track.stanceFrames++;
@@ -173,6 +197,11 @@ export function evaluateGait(
       }
 
       if (i < steps) {
+        // Before the step, so the impulse is integrated by the step it is scheduled for.
+        while (nextImpulse < impulses.length && impulses[nextImpulse]!.at <= snap.time) {
+          sim.applyTorsoImpulse(impulses[nextImpulse]!.x);
+          nextImpulse++;
+        }
         if (sim.steps % CONTROL_EVERY === 0) {
           gaitTargets(morph, params, sim.time, sim.controlState(), targets);
           sim.setJointTargets(targets);

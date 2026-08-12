@@ -5,6 +5,14 @@
 
 import RAPIER from '@dimforge/rapier2d-compat';
 import type { ControlState, Morphology, Rng } from '@evolab/evolution';
+import {
+  buildTerrain,
+  FLAT,
+  groundHeightAt,
+  SAMPLE_SPACING,
+  type Terrain,
+  type TerrainSpec,
+} from './terrain.ts';
 
 /** Physics runs at a fixed timestep. Never step by frame delta. */
 export const TIMESTEP = 1 / 240;
@@ -69,8 +77,16 @@ export interface Snapshot {
   readonly steps: number;
   readonly bodies: readonly BodyPose[];
   readonly joints: readonly JointAnchor[];
-  /** Height of the torso centre, metres. Below ~55% of standing means it fell. */
+  /**
+   * Height of the torso centre **above the ground beneath it**, metres. Below ~55% of
+   * standing means it fell.
+   *
+   * Ground-relative since slice 14, and on flat ground identical to what it always was. An
+   * absolute height would call a robot fallen halfway up a ramp and upright halfway down one.
+   */
   readonly torsoHeight: number;
+  /** Ground height under the torso, metres. Zero on flat ground. */
+  readonly groundY: number;
   readonly fallen: boolean;
   /** Forward displacement of the torso from its spawn position, metres. */
   readonly distance: number;
@@ -93,6 +109,15 @@ export interface SimOptions {
   readonly gravity?: number;
   readonly motorStiffness?: number;
   readonly motorDamping?: number;
+  /**
+   * The ground. Defaults to the flat floor every slice before 14 had.
+   *
+   * Flat is **not** a heightfield with two zeroes in it. A cuboid slab and a polyline generate
+   * contacts differently enough to move the golden number, so flat ground keeps the collider
+   * it has always had and terrain is the added case. Measured, not assumed — see the slice 14
+   * notes.
+   */
+  readonly terrain?: TerrainSpec;
 }
 
 export class Sim {
@@ -116,6 +141,7 @@ export class Sim {
   private readonly stiffness: number;
   private readonly damping: number;
   private readonly spawnX: number;
+  private readonly terrain: Terrain;
   private stepCount = 0;
 
   constructor(morph: Morphology, opts: SimOptions = {}) {
@@ -128,14 +154,8 @@ export class Sim {
     this.world = new RAPIER.World({ x: 0, y: opts.gravity ?? -9.81 });
     this.world.timestep = TIMESTEP;
 
-    // Ground: a long, thin fixed slab whose top surface sits exactly at y = 0.
-    const groundBody = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5),
-    );
-    this.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(60, 0.5).setFriction(1.0).setCollisionGroups(GROUND_GROUPS),
-      groundBody,
-    );
+    this.terrain = buildTerrain(opts.terrain ?? FLAT);
+    this.buildGround();
 
     const tilt = opts.tilt ?? 0;
 
@@ -229,6 +249,134 @@ export class Sim {
    * moving towards +x) has a negative rotation. Pitch negates it, so that positive means
    * falling forward and the balance gain reads as a corrective term.
    */
+  /**
+   * The floor.
+   *
+   * Flat ground is a long thin slab whose top surface sits exactly at y = 0 — what every slice
+   * before 14 built, kept byte for byte because a polyline and a cuboid do not generate
+   * identical contacts and the golden number is measured on this one.
+   *
+   * Everything else is a Rapier heightfield over the same `Float32Array` that
+   * `groundHeightAt` reads. In 2D a heightfield spans `scale.x` centred on the collider, so
+   * the translation puts sample 0 at `terrain.x0`.
+   */
+  private buildGround(): void {
+    const spec = this.terrain.spec;
+
+    // Flat ground is built **exactly** as it was before slice 14: the rigid body carries the
+    // −0.5 offset and the collider sits at its local origin.
+    //
+    // Not fussiness. Moving that same offset onto the collider instead is geometrically
+    // identical and numerically is not — it takes a different floating-point path through the
+    // solver, and it moved the golden number from 6.4598 to 5.8015. Terrain is added beside
+    // this case, never over it.
+    if (spec.kind === 'flat') {
+      const body = this.world.createRigidBody(
+        RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5),
+      );
+      this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(60, 0.5).setFriction(1.0).setCollisionGroups(GROUND_GROUPS),
+        body,
+      );
+      return;
+    }
+
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    const add = (desc: RAPIER.ColliderDesc): void => {
+      this.world.createCollider(
+        desc.setFriction(1.0).setCollisionGroups(GROUND_GROUPS),
+        body,
+      );
+    };
+
+    switch (spec.kind) {
+
+      case 'ramp': {
+        // One slab, rotated. Exact rather than sampled, and with no seam anywhere along it,
+        // which is why a 0° ramp is the flat slab rather than merely close to it.
+        //
+        // The slab's top surface passes through the origin at angle a: take the centre `half`
+        // along the slope from there, then half a thickness down the slope normal.
+        const a = (spec.degrees * Math.PI) / 180;
+        const half = spec.length / 2;
+        add(
+          RAPIER.ColliderDesc.cuboid(half, 0.5)
+            .setTranslation(half * Math.cos(a) + 0.5 * Math.sin(a), half * Math.sin(a) - 0.5 * Math.cos(a))
+            .setRotation(a),
+        );
+        // A level approach, so the robot always spawns flat whatever it is about to climb.
+        add(RAPIER.ColliderDesc.cuboid(4, 0.5).setTranslation(-4, -0.5));
+        return;
+      }
+
+      case 'steps': {
+        // One slab per tread, each thick enough that its centre sits at y = -0.5 whatever its
+        // top is — so the bottom is always well below the world and only the top face matters.
+        add(RAPIER.ColliderDesc.cuboid((spec.start + 4) / 2, 0.5)
+          .setTranslation((spec.start - 4) / 2, -0.5));
+        for (let n = 1; n <= spec.count; n++) {
+          const x = spec.start + (n - 1) * spec.tread;
+          const width = n === spec.count ? spec.length - x : spec.tread;
+          const top = n * spec.rise;
+          add(
+            RAPIER.ColliderDesc.cuboid(width / 2, (top + 1) / 2)
+              .setTranslation(x + width / 2, top - (top + 1) / 2),
+          );
+        }
+        return;
+      }
+
+      case 'rough': {
+        // A chain of rotated slabs, one per sample — **not** a Rapier heightfield.
+        //
+        // A heightfield generates a contact point per segment under the collider: twenty of
+        // them beneath a 16 cm foot, against two for a cuboid. Measured, that over-constrained
+        // manifold is not a nuance — five independently evolved gaits walked a mean 2.84 m on
+        // flat ground and 0.64 m on a *geometrically identical* flat heightfield, with 5/5
+        // falling, and varying the amplitude from 0 to 4 cm barely moved the number. The task
+        // would have measured the collider rather than the terrain.
+        const { heights, x0 } = this.terrain;
+        for (let i = 0; i < heights.length - 1; i++) {
+          const y0 = heights[i]!;
+          const y1 = heights[i + 1]!;
+          const a = Math.atan2(y1 - y0, SAMPLE_SPACING);
+          const len = Math.hypot(SAMPLE_SPACING, y1 - y0);
+          // Centre of a slab whose top face runs from (x0+i·s, y0) to the next sample.
+          const cx = x0 + i * SAMPLE_SPACING + SAMPLE_SPACING / 2;
+          const cy = (y0 + y1) / 2;
+          add(
+            RAPIER.ColliderDesc.cuboid(len / 2, 0.5)
+              .setTranslation(cx + 0.5 * Math.sin(a), cy - 0.5 * Math.cos(a))
+              .setRotation(a),
+          );
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * Ground height under a world x — the one question the fall and contact tests ask.
+   *
+   * Reads the same array the collider was built from, so the two cannot drift apart. If they
+   * ever did, the robot would float or sink with nothing on screen to explain it.
+   */
+  groundAt(x: number): number {
+    return groundHeightAt(this.terrain, x);
+  }
+
+  /**
+   * Shove the torso — §6's Shove task, redefined as a fore/aft impulse.
+   *
+   * "Lateral" has nowhere to point in a sagittal simulation. A push along x tests the same
+   * thing the task is for, which is whether an open-loop gait can recover from a disturbance
+   * it never saw during evolution, and tests it harder: the robot has to catch itself with the
+   * legs it actually has rather than by widening its stance.
+   */
+  applyTorsoImpulse(x: number): void {
+    this.bodies.get('torso')?.applyImpulse({ x, y: 0 }, true);
+  }
+
   controlState(): ControlState {
     const torso = this.bodies.get('torso');
     if (!torso) return { pitch: 0, pitchRate: 0 };
@@ -284,7 +432,11 @@ export class Sim {
     });
 
     const torso = this.bodies.get('torso');
-    const torsoHeight = torso ? torso.translation().y : 0;
+    // Height above the ground *here*, not above y = 0. On flat ground groundY is zero and this
+    // is exactly what it always was; on an 18° ramp an absolute height would rise 6.5 m over
+    // twenty metres and the fall test would never fire.
+    const groundY = torso ? this.groundAt(torso.translation().x) : 0;
+    const torsoHeight = torso ? torso.translation().y - groundY : 0;
 
     // In 2D a body's rotation is a scalar, so a revolute joint's angle is simply the
     // difference between child and parent rotations — zero in the rest pose, which is
@@ -300,6 +452,7 @@ export class Sim {
       bodies,
       joints,
       torsoHeight,
+      groundY,
       fallen: torsoHeight < 0.55 * this.morph.segments[0]!.y,
       distance: torso ? torso.translation().x - this.spawnX : 0,
       jointAngles,

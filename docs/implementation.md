@@ -2681,6 +2681,85 @@ Node with no Rapier, like `bodies.ts`. **Sampled every 2 cm**: a 12 cm riser the
 sample, which is an 80° face rather than a true vertical one. That is what "steps" means at this
 fidelity and the note belongs next to the constant, not in a commit message.
 
+### Session one, measured: the ground layer works, and it cut another task
+
+> The sim half is built and the golden number is unchanged. Then the tasks were measured
+> against five independently evolved gaits, and **Rough cannot be built either** — for a reason
+> that has nothing to do with roughness.
+
+**Every claim below is against five gaits evolved from different seeds** (45 generations, single
+island), not against the reference champion. The first three attempts at this measurement used
+one gait, and one gait cannot tell a brittle champion from a broken collider.
+
+#### A segmented ground is not a floor
+
+The first version built all terrain as a Rapier heightfield. A heightfield generates a contact
+point per segment beneath a collider: **twenty of them under a 16 cm foot, against two for a
+cuboid slab.** That over-constrained manifold is not a nuance.
+
+```
+                       mean distance over 5 gaits   fell
+flat, one cuboid slab              2.84 m           1/5
+flat, as a heightfield             0.64 m           5/5      <- identical geometry
+```
+
+Replacing the heightfield with a chain of rotated cuboids — two contact points each — changed
+nothing (0.65–1.07 m at every spacing from 2 cm to 25 cm). So it is not the contact count, it is
+**the seams**: a foot bridging two colliders gets two independent manifolds, and ghost
+collisions at the internal edges cost more than any terrain does.
+
+The fix for the terrain that *can* be expressed without seams is to stop sampling it:
+
+- **flat** — the original slab, untouched
+- **ramp** — one slab, rotated. Exact, and seamless along its whole length
+- **steps** — one slab per tread. Real edges, four of them
+
+Measured, a 0° ramp built as a rotated slab is indistinguishable from flat ground: **2.84 m
+against 2.84 m.** That is the number that says the representation is faithful.
+
+#### Rough is cut, and the evidence is that it has no signal
+
+Rough is the one profile that cannot avoid seams, and with them its amplitude stops mattering:
+
+```
+rough, wavelength 2 m      0 cm   1.70 m      1 cm   1.14 m      3 cm   1.15 m
+```
+
+Against 3.80 m on flat ground for the same gaits. **The seams cost about 2 m and the roughness
+costs about 0.5 m**, so the task would report the collider rather than the terrain. A task whose
+own parameter barely moves its result is not a hard task, it is a broken one — the rule the
+thresholds section already states, arriving earlier than expected.
+
+So the suite is **six tasks**: Sprint, Endurance, Incline, Steps, Shove, Payload. §6 said eight,
+the sagittal plane took Slalom, and the contact solver took Rough.
+
+#### What the surviving tasks actually discriminate
+
+```
+                       flat 3.80 m baseline, 5 gaits
+Incline    +2°  1.77    +4°  0.60    +8° −0.22    −3°  1.09     clean gradient
+Payload   +10%  3.58   +25%  1.49   +50%  1.23                  clean gradient
+Shove      +20  2.10    +40  2.13    +80  2.18                  saturates
+           −40  0.89                                            discriminates
+Steps    4×2cm  2.26  4×6cm  2.15                               weak
+```
+
+**Incline and Payload are the good tasks.** Shove only discriminates backwards — any forward
+impulse large enough to matter causes a fall, so magnitude stops mattering; the task uses
+retarding impulses. **Steps is weak**: most of its cost is its four seams rather than its rise,
+which is the Rough problem in miniature and the reason it survives only because four seams are
+countable and 3,200 are not.
+
+#### The offset that moved the golden number
+
+Restructuring the ground builder moved the −0.5 m offset from the rigid body onto the collider.
+Geometrically identical; numerically not — **6.4598 became 5.8015**. It takes a different
+floating-point path through the solver.
+
+Flat ground is therefore built exactly as it always was, as an early return above the terrain
+switch, with the reason written next to it. The lesson generalises past this project: *when a
+golden number exists, "geometrically identical" is not a safe refactor of physics setup.*
+
 ### Five seeds, a median, and a spread — and a budget
 
 §6: *"a gait that clears the steps once in five is a gait that does not clear the steps."* Fixed,

@@ -104,6 +104,12 @@ export function snapshotAt(rec: Recording, frame: number): Snapshot {
     bodies,
     joints,
     torsoHeight: rec.torsoHeight[f]!,
+    // Zero because **only flat-ground trials are ever recorded**: the search runs on flat
+    // ground and the scorecard does not ask for recordings. `torsoHeight` above is already
+    // ground-relative, so on flat ground it is exactly what it always was. The day a terrain
+    // trial is recorded, this needs a per-frame array beside `torsoHeight` — otherwise the 3D
+    // replay would draw the robot walking through a hillside.
+    groundY: 0,
     // Recomputing `fallen` from the recording would need the standing height; the trial
     // already decided, and it stopped recording at the frame it decided on.
     fallen: rec.fell && f === rec.frames - 1,
