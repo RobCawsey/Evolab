@@ -2347,12 +2347,58 @@ is a second machine."*
 
 ```
 server/
-  Evolab.Server/           one project: Program.cs, endpoints, EF Core context, entities
+  Evolab.Server/           Program.cs, endpoints, EF Core context, entities, repositories
   Evolab.Server.Tests/     xUnit
 ```
 
 Not `src/`, not four projects, not a solution folder per layer. One project until something
 forces otherwise.
+
+### Repositories, and what they are actually for here
+
+An earlier draft of this section said no repository pattern, on the grounds that eight
+endpoints and a `DbContext` do not need one. That was the right instinct about *ceremony* and
+the wrong call about *testing*, which is the benefit that actually applies:
+
+**Endpoint tests should not need a SQLite file or a disk.** A fake `IRunRepository` and a fake
+`ITrajectoryStore` let every endpoint be tested for its behaviour — what it returns, what it
+rejects, what it does twice — with no I/O and no fixture teardown. That is worth an interface
+on its own, and it is a better argument than swappability, which EF Core already provides for
+the price of a connection string (§5 says exactly this).
+
+Two interfaces, no more:
+
+```csharp
+public interface IRunRepository
+{
+    Task<Guid>                      AddAsync(Run run, CancellationToken ct);
+    Task<Run?>                      GetAsync(Guid id, CancellationToken ct);
+    Task<IReadOnlyList<RunSummary>> ListAsync(int take, CancellationToken ct);
+    Task<Run?>                      GetByTokenAsync(string token, CancellationToken ct);
+    Task<string?>                   PublishAsync(Guid id, CancellationToken ct);
+}
+
+public interface ITrajectoryStore
+{
+    Task<string>  PutAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct);  // → content hash
+    Task<Stream?> OpenAsync(string hash, CancellationToken ct);
+}
+```
+
+Three rules that keep this a seam rather than a second ORM:
+
+- **Return materialised results, never `IQueryable`.** A repository that hands back a query
+  has not abstracted the database, it has renamed it — and the fake cannot honestly implement
+  it. This is the failure mode that gives the pattern its bad name.
+- **One repository per aggregate, not per table.** A run owns its archive cells and its
+  history; they are never fetched independently, so they are not separate repositories.
+- **No service layer on top.** The endpoint is the handler. If a method would only forward to
+  the repository, the endpoint calls the repository.
+
+`ITrajectoryStore` is the seam §5 has in mind when it says *"a blob store abstraction can wait
+until there is a second machine"* — the interface is here for the fake, and the only
+implementation writes files under a data directory. When a second machine exists, that is the
+one class to change.
 
 **`npm test` must not require .NET, and `dotnet test` must not require Node.** The 219 Vitest
 tests are the ones that guard the golden number and the physics; they cannot start depending
@@ -2393,6 +2439,8 @@ into `wwwroot/`. That copy step is the only place the two builds touch.
       no `localStorage`, and no account.
 - [ ] Killing the server leaves the app fully usable, with no error dialog and no console
       noise beyond one line.
+- [ ] Every endpoint has a test that runs against fakes — no SQLite file, no disk, no
+      fixture teardown. That is what the two repository interfaces are for.
 - [ ] The golden number is still 6.4598. Nothing here touches the search.
 
 ### Deliberately not in this slice
@@ -2407,9 +2455,14 @@ the cheap answer if it is ever wanted.
 **No Docker, no CI, no migrations story beyond `EnsureCreated`.** One SQLite file on one VPS.
 When there are two of anything, revisit.
 
-**No repository pattern, no MediatR, no DTO mapping layer, no service interfaces with one
-implementation.** Eight endpoints and a `DbContext`. This is the whole point of the warning at
-the top.
+**No MediatR, no DTO mapping layer, no service layer above the repositories.** Two interfaces
+for the two things that touch I/O, so endpoints can be tested without a database or a disk —
+and nothing above them. The endpoint is the handler.
+
+That is a deliberate line rather than a slippery slope: `IRunRepository` and `ITrajectoryStore`
+exist because a fake makes a test possible. An interface with one implementation and no fake
+is just a longer way to write a class, and §5's warning at the top of this section applies to
+every one of them.
 
 ---
 
