@@ -49,12 +49,10 @@ without it.
 
 - **Needs:** Node 22 or newer. The CLI scripts run TypeScript directly via
   `--experimental-strip-types`, so there is no build step for tests or scripts.
-- **Install:** `npm install` — once, from the repo root.
-- **Run:** `npm run dev`
-- **Open:** **http://localhost:5173**
+- **Opens on:** **http://localhost:5173**
 
 ```bash
-npm install
+npm install        # once, from the repo root
 npm run dev
 ```
 
@@ -65,7 +63,6 @@ number on screen. Every panel header also has its own `?`.
 ### Backend — optional
 
 - **Needs:** .NET 9.
-- **Run:** `dotnet run --project server/Evolab.Server`
 - **Listens on:** **http://localhost:5000** — the dev server proxies `/api` to it, so keep both
   running and carry on using http://localhost:5173.
 - **Adds:** saved runs, read-only share links, and the community behaviour map.
