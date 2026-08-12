@@ -258,11 +258,23 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 14 — the task suite. Sketched in
-[docs/implementation.md](docs/implementation.md#slice-14--task-suite); write it out first.
+Next: slice 14 — the task suite, **written out** in
+[docs/implementation.md](docs/implementation.md#slice-14--task-suite). The last slice on the
+list; nothing after it is planned.
 
-Eight terrain generators and a scorecard — a lot of small, independent work, so it suits short
-sessions. It is the last slice on the list, and nothing after it is planned.
+**It is seven tasks, not eight, and the work is not the terrain generators.** Slalom cannot be
+built — the physics is sagittal, so there is no lateral axis for a gate to be beside and no
+steering gene for the search to act on. Shove is redefined as a fore/aft impulse, which tests
+the same thing harder. §6 wants an amendment, the same shape as §4's and §9's.
+
+**Three things in `packages/sim` assume the ground is a plane at y = 0**: `fallen` is an absolute
+torso height, foot contact compares to zero, and stride and duty inherit it from contact. All
+three become ground-relative against one `groundHeightAt(x)`. Flat ground is terrain `[0, 0]`, so
+the acceptance test is that **6.4598 does not move**.
+
+Cost of transport is not measurable here for the reason `effort` is not joules, so Endurance
+reports joint travel per metre. Thresholds ship as placeholders and get calibrated against the
+reference champion — a task no gait can pass is a broken task, not a hard one.
 
 **§10 is amended, and it was wrong in every column of its bottom two rows.** Monitor mode is
 *view a finished run, read-only* — what `?shared=<token>` does, at any width — not the live

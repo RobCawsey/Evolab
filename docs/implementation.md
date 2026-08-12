@@ -2557,12 +2557,207 @@ store exist and are tested, and nothing calls them.
 
 ## Slice 14 — Task suite
 
-Sketch only. Will be written out fully at the end of slice 13.
+> **Status: specified.** Three sessions. §6 of the design document, which is the most completely
+> specified section in it and the one that has aged worst.
 
-Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for
-short sessions.
+### Goal
+
+Take a genome through a fixed set of tasks — rough ground, slopes, steps, a shove, extra mass —
+and get a **scorecard** rather than a single number. §6's opening line is the whole argument:
+*"Gaits evolved on flat ground are brittle in a way that is invisible until you test them."*
+
+Everything the project has built so far scores a gait on 4 seconds of flat ground. This slice is
+where that bill arrives, and the scorecard is expected to be humbling. That is the point.
+
+### §6 says eight tasks. Seven of them are possible.
+
+The 2D decision recorded in §4 and §9 reaches §6, and nobody noticed until now because §6 was
+written when the physics was going to be three-dimensional.
+
+| §6 task | Verdict |
+|---|---|
+| Sprint | Builds as written |
+| Endurance | Builds, with the metric renamed — see below |
+| Rough | Builds as written |
+| Incline | Builds as written |
+| Steps | Builds as written |
+| **Slalom** | **Cut.** "Six waypoint gates", testing "steering, turn-in-place" |
+| **Shove** | **Redefined.** "Lateral impulses" |
+| Payload | Builds as written |
+
+**Slalom cannot be built, and not because it is hard.** The simulation is sagittal: there is no
+lateral axis for a gate to be beside, and the eleven-gene genome has no steering term, so nothing
+in the search could learn to pass one. It would be a task every gait fails identically for a
+reason that has nothing to do with the gait.
+
+**Shove is redefined rather than cut**, because the *thing it tests* survives the projection even
+though the axis does not. A fore/aft impulse to the torso tests recovery from a push, which is
+what "closed-loop reflex quality" means, and it is a harder test in the sagittal plane than a
+sideways one would be — the robot has to catch itself with the legs it actually has.
+
+So: **seven tasks, and §6 wants an amendment**, the same shape as §4's and §9's. Its title is
+"Eight ways to fail" and it will need a new one.
+
+### Three things in `packages/sim` assume the ground is a plane at y = 0
+
+This is the actual work of the slice. Eight terrain generators is the part that sounds like the
+work and is not.
+
+1. **`fallen`** is `torsoHeight < 0.55 × standing height`, an *absolute* y. Twenty metres up an
+   18° ramp raises the torso by 6.5 m, so a robot climbing perfectly would never be judged
+   fallen and one descending a 12° ramp would be judged fallen immediately.
+2. **Foot contact** is `lowestCorner(...) <= 0.005`, compared against zero. `evaluate.ts` already
+   says so out loud: *"Revisit when the floor stops being flat."* This is that.
+3. **`strideLength` and `dutyFactor`** are derived from contact, so they inherit the problem.
+
+All three are the same fix: **terrain is a height function, and every one of these becomes
+relative to the ground beneath the robot.** `groundHeightAt(x)`.
+
+**One array, two consumers.** The heights that build the collider and the heights that answer
+`groundHeightAt` must be the same `Float32Array` — if they ever disagree the robot floats or
+sinks and nothing on screen explains why. The same rule as slice 10's *one time axis, one frame
+index*, and it is worth a test that samples both.
+
+Flat ground becomes `heights = [0, 0]`, so **the existing behaviour is a special case of the new
+one**, and the acceptance test is that the golden number does not move. If 6.4598 changes, the
+terrain layer has changed flat-ground physics and the slice is wrong.
+
+### The suite re-runs the simulation, and that is not a contradiction
+
+Slice 10's rule was that nothing in it re-runs the simulation, enforced by a test that scans
+`render/gait/` for `evaluate(`. That rule was about *watching* a gait: a panel that simulates
+makes looking at a gait cost as much as evolving one.
+
+This slice is about *testing* a gait, and running new trials is the entire feature. Seven tasks
+× five seeds is 35 trials per scorecard, and the rule that replaces slice 10's is that a
+scorecard is **explicit and on demand** — a button, never a thing that happens because a panel
+became visible.
+
+**These trials never reach the archive.** The behaviour map is an observation of a search, and
+the search runs on flat ground; folding in terrain trials would make coverage a claim about two
+different worlds. Slice 8's rule, still holding.
+
+### Cost of transport is not measurable, for the reason `effort` is not joules
+
+§6 gives Endurance the primary metric "cost of transport". `TrialResult.effort` already records
+why that number cannot exist here: Rapier's JavaScript binding exposes no joint impulses, so the
+torque a motor actually applied cannot be read back.
+
+So Endurance reports **joint travel per metre, radians/m** — the same ranking CoT would give for
+a position-controlled robot, in units that are honest about what was measured. It must not be
+labelled CoT anywhere, including in the mockups, which currently print `CoT 0.31`.
+
+### Tasks are data. The metric is a named function, not an expression.
+
+§6's decision line asks for "terrain generator, spawn, success predicate, **metric expression**",
+loading as data so users can author tasks.
+
+The first three are straightforwardly data. The fourth is not worth what it costs: Evolab has no
+expression evaluator, and adding one — a parser, a sandbox, and a new class of runtime error —
+so that a task can say `distance / time` instead of `metric: 'meanSpeed'` is a bad trade against
+a lookup table with seven entries. **The metric is a key into a record of functions.** Everything
+else §6 wanted from "declarative" survives: a user-authored task still picks its terrain, its
+duration, its impulses, its mass change and its thresholds.
+
+```ts
+interface Task {
+  readonly key: string;
+  readonly name: string;
+  /** What failing it tells you. Same job as the challenge cards' `teaches`. */
+  readonly teaches: string;
+  readonly terrain: TerrainSpec;      // flat | ramp | rough | steps
+  readonly seconds: number;
+  /** Payload: a multiplier on torso density, applied through `BipedSpec`. */
+  readonly torsoDensity?: number;
+  /** Shove: impulses at the torso, in newton-seconds, at a time in seconds. */
+  readonly impulses?: readonly { readonly at: number; readonly x: number }[];
+  readonly metric: MetricKey;
+  readonly thresholds: { readonly bronze: number; readonly silver: number; readonly gold: number };
+}
+```
+
+`TerrainSpec` → `Float32Array` of heights at a fixed spacing is one pure function, testable in
+Node with no Rapier, like `bodies.ts`. **Sampled every 2 cm**: a 12 cm riser then occupies one
+sample, which is an 80° face rather than a true vertical one. That is what "steps" means at this
+fidelity and the note belongs next to the constant, not in a commit message.
+
+### Five seeds, a median, and a spread — and a budget
+
+§6: *"a gait that clears the steps once in five is a gait that does not clear the steps."* Fixed,
+stated seeds, so two scorecards are comparable.
+
+35 trials is cheap only if the durations are. Endurance as written is "200 m flat, no limit",
+which at ~1 m/s is 200 s of simulated time — 48,000 steps × 5 seeds, and at the measured ~84,000
+steps/s that is fourteen seconds for one task. **Every task gets a fixed seconds budget** and
+Endurance measures travel per metre over a bounded run rather than an unbounded one.
+
+Target: **the whole scorecard in under 5 seconds.** State the measured number when it exists.
+
+It runs in **the existing island worker, behind one new message type**, not a worker of its own.
+Appendix A measured the cost of a second Rapier context at ~1.5 MB of inlined WASM per bundle,
+and a third one to avoid a `switch` is the wrong trade. The consequence — a scorecard needs a
+pool, and a pool is built lazily — is the thing to check early.
+
+### Thresholds are calibrated, not guessed
+
+Slice 8 set both archive axis ranges from the textbook and both were wrong; running it is what
+showed it. The same trap is open here and it is worse, because a scorecard that reads FAIL seven
+times teaches nothing at all.
+
+So the thresholds in `tasks.ts` ship as **placeholders**, and the first job after the suite runs
+is to put the reference champion (seed 4417, 30 generations, 5.96 m) and two or three archive
+elites through it and set bronze at roughly what they achieve. The numbers go in the notes with
+the gaits that produced them. **A task no gait can pass is a broken task, not a hard one.**
+
+The composite badge keeps §6's good rule: a minimum in *every* task, so a sprint specialist
+cannot buy a gold with speed alone.
+
+### Shape of the work
+
+**`packages/sim`.** `terrain.ts` — `TerrainSpec` → heights, pure, no Rapier. `world.ts` takes a
+terrain and builds a heightfield collider; `groundHeightAt(x)` reads the same array. `fallen` and
+the contact test become ground-relative. `Sim.applyImpulse`.
+
+**`packages/evolution`.** `tasks.ts` — the seven task definitions as data, the metric functions,
+and `scorecard(results)` folding trials into badges. Pure, so the whole thing tests in Node.
+
+**`apps/web`.** One new worker message; a scorecard panel with a Run button; seven rows and a
+composite badge.
+
+### Done when
+
+- [ ] The golden number is still 6.4598 — flat ground is terrain `[0, 0]` and nothing else moved.
+- [ ] `groundHeightAt` and the collider are provably the same heights, with a test that samples
+      both.
+- [ ] A robot walks up an 18° ramp without being judged fallen, and down a 12° one without being
+      judged fine.
+- [ ] Seven tasks × five seeds produce a scorecard with a median and a spread per task.
+- [ ] Thresholds are calibrated against real gaits and the gaits are named in the notes.
+- [ ] The whole scorecard runs in under 5 seconds and never on the main thread.
+- [ ] Terrain trials do not reach the behaviour archive.
+- [ ] §6 is amended: seven tasks, Slalom cut with its reason, Shove redefined, CoT renamed.
+
+### Deliberately not in this slice
+
+**No Slalom, and no steering.** Cut for the reason §4 gives, not deferred.
+
+**No user-authored tasks.** They load as data, which is the precondition; a UI for writing them
+is a different slice and §6 said v1.1 itself.
+
+**No export.** Fig 9.7 has an "Export scorecard" button. A run already round-trips through the
+server; a second serialisation format needs a reason.
+
+**No re-evolution against tasks.** Scoring the search on the suite is multi-objective evolution,
+which §14 defers out of v1 entirely, and it would make the archive descriptors meaningless.
+
+### Two stale references to fix in passing
+
+`CONTACT_EPSILON` in `evaluate.ts` says the floor stays flat "until the challenge track in slice
+14" — the challenge track was slice 11, and slice 14 is this. And the §6 mockups print `CoT
+0.31`, which is a number this project cannot measure.
 
 ---
+
 ## Appendix A — Rapier notes
 
 Accumulated API facts. Add to this whenever something surprises you.
