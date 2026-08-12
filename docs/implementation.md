@@ -2079,6 +2079,37 @@ The phrasing needed care too — `'{bestDips} times'` prints *"1 times"* on the 
 lesson only just happens. It reads "went down on {bestDips} of the generations you just
 watched" instead.
 
+### The stepper runs its own island, and two cards were broken by not knowing that
+
+Cards 2 and 3 tell the learner to open the stepper and watch an operator. Both originally
+checked `generations >= 1` — which counts the **worker pool's** generations.
+
+`createStepper` builds its own `Island`, and that is deliberate: it needs synchronous control
+of a generation, and the pool's islands live in workers. The two searches share nothing. So
+stepping never moved the number the cards were watching, and since neither card sets `gens`,
+the target stayed at whatever the previous card left it. Completing card 2 silently required
+closing the stepper and running thirty generations of an unrelated pool. **Doing exactly what
+the card asked completed nothing.**
+
+`StepperOptions` gained one callback, `onStage`, reporting each operator as it is stepped
+past — the only wire between the stepper and the track — and `Outcome` gained
+`stepperSelections`, `stepperCrossovers` and `stepperMutations`.
+
+Those three are **the only outcome fields not measured from a run**, and they are deliberately
+not persisted. The point of the cards is that you *saw* the operator happen; a count restored
+from `localStorage` would assert that about somebody who had not.
+
+Checks now also run when the stepper advances, not only when a run reaches its target — a
+stepper card has no run to end. Card 2 completes on the third step and card 3 on the fourth,
+which is exactly when `select` and `crossover` appear.
+
+**Ending a run and completing a card are separate**, and conflating them is a mistake worth
+recording because it was made and nearly shipped. The first fix returned early from
+`settleChallenge` when the check failed, which meant a failed attempt showed no afterword at
+all — and the `otherwise` branches are where the teaching lives. A learner whose robot fell
+needs the explanation *more* than one whose robot walked. `finishRun` now sets the afterword
+due unconditionally and then asks, separately, whether the card is complete.
+
 ### The track had to fit without scrolling
 
 Eleven cards in a 236 px column came to 1,193 px against 858 px of space, and the measurement
@@ -2166,7 +2197,8 @@ test needs to check placeholders at runtime and a type alone could not.
 
 - [x] Eleven cards render as a track, each naming its concepts, later ones dimmed not locked.
 - [x] Opening a card configures stage, goal, seed, generations and GA knobs in one click.
-- [x] Success is evaluated from the run outcome and marks concepts, not cards.
+- [x] Success is evaluated from the run outcome — or, for the two stepper cards, from the
+      operators actually stepped past — and marks concepts, not cards.
 - [x] Afterwords interpolate live values and branch; both branches of cards 4 and 6 are tested.
 - [x] Every referenced concept has a note and every note is reachable — both directions.
 - [x] The challenge data round-trips through `JSON.stringify`.
@@ -2190,13 +2222,203 @@ somewhere to go.
 
 ---
 
-## Slices 12–14 — Later stages
+## Slice 12 — The server
+
+> **Status: next.** Three sessions, and the first slice that adds a second language, a second
+> runtime and a deployment story to a project that currently has none of the three.
+
+### Goal
+
+Runs outlive a browser profile, and a gait can be shown to somebody. One ASP.NET Core
+project, about eight endpoints, a SQLite file. §5 of the design document.
+
+### Read this before opening an editor
+
+§5 states the risk plainly and it is worth restating here because it is now personal:
+
+> A C# developer will want to start here. It is the familiar ground, the part where the shape
+> of the work is obvious, and there is a real temptation to spend the first three weekends on
+> a well-layered API for a client that does not exist yet.
+
+Everything valuable in Evolab happens in the browser. Eleven slices went into it and the
+server stores what they produced. The failure mode is not writing a bad server — it is
+writing an excellent one, with repositories and mediators and a mapping layer, that saves a
+JSON blob for one user.
+
+The corrective, concretely: **if the server ever takes longer than the browser feature it
+enables, stop and write the browser feature.**
+
+### The rule that keeps this honest
+
+**The app must work with no server at all.** Not degrade — work, exactly as it does today.
+
+Every call is an enhancement, every failure is silent, and there is no loading state on the
+critical path. `npm run dev` must keep working with .NET not installed, `npm test` must keep
+passing, and the whole of slices 0–11 must remain reachable from a `file://` URL.
+
+That is not caution, it is the product: the browser is where evolution happens, and a
+personal project whose teaching tool goes down because a VPS did is a worse project.
+
+Practically this means one module, `apps/web/src/net/api.ts`, which every server call goes
+through, and whose every function returns a result rather than throwing.
+
+### Settle first: §5 and §10 disagree about monitor mode
+
+§10 specifies, below 600 px, *"single column, monitor mode, remote run only, read-only"*, and
+Fig 10.1 says **"evolution continues on the desktop session or the server; the phone
+subscribes to it."**
+
+§5 deletes the mechanism: *"No SignalR. It was there to stream generations from cloud islands.
+There are no cloud islands."*
+
+A phone cannot subscribe to a live desktop session with the stack §5 specifies. The two
+sections were written at different times and the later one removed what the earlier one
+assumed.
+
+**Resolve in favour of §5, and amend §10.** Monitor mode becomes *view a finished run,
+read-only* — the share-token endpoint already gives exactly that, and it is genuinely useful:
+a gait you evolved on the desktop, opened on a phone, replayed with its scorecard. What it is
+not is live.
+
+If a live view is ever wanted, polling `GET /api/runs/{id}` every few seconds costs one
+`setInterval` and no new dependency. SignalR is not the cheapest way to get there and should
+not be reintroduced by default.
+
+Slice 11's notes and the CSS both already say the read-only half of §10 is unbuilt and needs
+this slice. This is what "needs this slice" turns out to mean.
+
+### Scope — two of the three phases
+
+§5 lists eight endpoints. They fall into three groups and only the first two are this slice:
+
+| | Endpoint | Slice |
+|---|---|---|
+| serve | `GET /` — the built SPA, one origin, no CORS | 12 |
+| store | `POST /api/runs`, `GET /api/runs`, `GET /api/runs/{id}` | 12 |
+| | `GET /api/trajectories/{hash}` | 12 |
+| share | `POST /api/runs/{id}/publish`, `GET /api/shared/{token}` | 12 |
+| pool | `GET /api/archive` — merged community elites | **13** |
+
+`GET /api/archive` is slice 13's whole subject and pulling it forward would mean designing the
+merge semantics twice.
+
+### What a run actually is
+
+The browser holds this already; nothing new is computed. The work is deciding what crosses the
+wire and in what shape.
+
+```
+Run
+  id            GUID
+  createdAt     UTC
+  title         string, user-editable, defaults to the goal name
+  seed, generations, population, trialSeconds, workers
+  goal          preset key + the four objective weights, denormalised on purpose —
+                a preset may be reworded later and a stored run must still say what
+                it was actually scored on
+  bodySpec      the eleven numbers of `encodeSpec`
+  champion      genome (11 floats), fitness, and the whole FitnessBreakdown
+  archive       filled cells only: index, fitness, behaviour, genes
+  trajectory    content hash, or null
+  history       best/mean/diversity per generation, for the chart
+```
+
+**Denormalise the goal.** It is tempting to store `goal: "naive"` and look the weights up at
+read time. Presets are copy and copy gets reworded; a run must always be able to say what it
+was scored on, not what a preset of that name means today. Same argument as `IslandConfig.trialSeed`
+in slice 2: *if a score survives, the conditions it was scored under must not change.*
+
+**Archive cells are the payload.** 24 × 24 with maybe 250 filled at 15 floats each is about
+15 kB — worth storing whole, and it is what slice 13 merges.
+
+### Trajectories are files, not rows
+
+Slice 9's recordings are about 40 kB each and §5 is explicit: content-addressed by hash under
+a data directory, immutable, `cache-control: immutable`.
+
+Hash the buffer, write `data/trajectories/{hash}`, store the hash on the run. Two runs of the
+same champion share a file for free, and the endpoint can cache forever because the name *is*
+the content.
+
+Deliberately not a blob-store abstraction. §5: *"A blob store abstraction can wait until there
+is a second machine."*
+
+### Layout, and keeping Node-only work Node-only
+
+```
+server/
+  Evolab.Server/           one project: Program.cs, endpoints, EF Core context, entities
+  Evolab.Server.Tests/     xUnit
+```
+
+Not `src/`, not four projects, not a solution folder per layer. One project until something
+forces otherwise.
+
+**`npm test` must not require .NET, and `dotnet test` must not require Node.** The 219 Vitest
+tests are the ones that guard the golden number and the physics; they cannot start depending
+on a runtime this project did not need for eleven slices. Two commands, two toolchains, no
+orchestration between them.
+
+Dev loop: Vite on 5173 with a proxy for `/api` to the server on 5000, so the browser keeps hot
+reload. Production is one origin — `dotnet publish` after `npm run build`, with `dist/` copied
+into `wwwroot/`. That copy step is the only place the two builds touch.
+
+### Watch for
+
+- **No auth in this slice.** §5: *"Until publishing exists there is nobody to authenticate."*
+  Publishing exists at the end of this slice, so OIDC is the *next* thing, not this thing. A
+  share token is an unguessable GUID and that is the whole security model for now — say so out
+  loud rather than implying more.
+- **The share endpoint is anonymous and public.** Anything reachable by token is public. Do
+  not put anything in a run record that would embarrass someone if scraped.
+- **`localStorage` progress stays where it is.** Slice 11's concept progress is a few hundred
+  bytes about one person's understanding; it does not want a table and it does not want an
+  account. Revisit only if accounts arrive.
+- **Do not add a queue, a hub, a worker service, or a second deployable.** v1.0 had all of
+  them and §5 records why they went.
+- **Do not reintroduce server-side evolution.** It is the one decision the whole v2.0
+  architecture rests on.
+
+### Done when
+
+- [ ] `dotnet run` serves the built SPA at one origin, and every slice 0–11 feature works
+      through it exactly as through Vite.
+- [ ] `npm run dev` and `npm test` still work with .NET not installed — verified by checking
+      out clean on a machine without it, or at least by not referencing it from any npm script.
+- [ ] A finished run round-trips: upload, list, fetch, replay from the fetched record with the
+      champion, archive and chart all restored.
+- [ ] A trajectory uploads once, is served by hash, and a second upload of the same bytes
+      creates no second file.
+- [ ] Publishing mints a token; the shared URL replays read-only in a browser with no history,
+      no `localStorage`, and no account.
+- [ ] Killing the server leaves the app fully usable, with no error dialog and no console
+      noise beyond one line.
+- [ ] The golden number is still 6.4598. Nothing here touches the search.
+
+### Deliberately not in this slice
+
+**No community archive.** Slice 13, and `archiveMerge` already does the hard part.
+
+**No accounts, no OIDC, no registration form.** One provider, one day, when there is a reason.
+
+**No live monitoring, no SignalR, no WebSockets.** See the §10 resolution above; polling is
+the cheap answer if it is ever wanted.
+
+**No Docker, no CI, no migrations story beyond `EnsureCreated`.** One SQLite file on one VPS.
+When there are two of anything, revisit.
+
+**No repository pattern, no MediatR, no DTO mapping layer, no service interfaces with one
+implementation.** Eight endpoints and a `DbContext`. This is the whole point of the warning at
+the top.
+
+---
+
+## Slices 13–14 — Later stages
 
 Sketches only. Each will be written out fully at the end of the slice before it.
 
 | # | Name | Shape of the work |
 |---|---|---|
-| 12 | **The server** | One ASP.NET Core project: EF Core, SQLite, static hosting of the built SPA, about ten endpoints. See §5 of the design document. Nothing before this slice needs .NET installed. It is also where §12's four remaining *slice 12* rows — backend, server data, storage, deploy — stop being plans. |
 | 13 | **Community archive** | Publish elites; merged grid across all published runs. `archiveMerge` already does exactly this for the four islands — the only new part is that the maps arrive over HTTP rather than over `postMessage`. |
 | 14 | **Task suite** | Eight terrain generators and a scorecard. Mostly a lot of small, independent work — good for short sessions. |
 

@@ -33,6 +33,11 @@ four islands that is likely, not certain. `Outcome` gained `bestDips`, counted f
 chart's own series, and the card now branches. Measured five dips, largest 0.512 — which also
 verifies the new `gaOverrides` plumbing reaches the workers.
 
+**The stepper runs its own island**, so nothing it does reaches the pool — which is why the
+two stepper cards checked a number stepping could never move, and could not be completed by
+doing what they asked. `Outcome` gained `stepperSelections`/`Crossovers`/`Mutations`, the only
+fields not measured from a run and deliberately not persisted: the point is that you *saw* it.
+
 **Progress is per concept, not per card**, in `localStorage` — the first state in this project
 that cannot live in the URL. The parse is defensive because that key is user-writable and
 outlives the code reading it: junk degrades to empty rather than throwing on boot.
@@ -195,8 +200,22 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 12 — the server. Sketched in
-[docs/implementation.md](docs/implementation.md#slices-1214--later-stages); write it out first.
+Next: slice 12 — the server, now written out in full in
+[docs/implementation.md](docs/implementation.md#slice-12--the-server).
+
+**The rule that slice turns on: the app must work with no server at all** — not degrade,
+work exactly as today. Every call is an enhancement, every failure is silent, `npm run dev`
+and `npm test` keep working with .NET not installed.
+
+**§5 and §10 contradicted each other and the spec settles it.** §10 has a phone *subscribing*
+to a live run; §5 deletes SignalR because there are no cloud islands. Monitor mode becomes
+*view a finished run, read-only*, which the share-token endpoint already gives — and §10 wants
+an amendment saying so.
+
+§5's own warning is worth re-reading before starting: a C# developer will want to start here,
+and the failure mode is not writing a bad server but an excellent one for a client that does
+not exist. If the server ever takes longer than the browser feature it enables, stop and write
+the browser feature.
 
 **Three of §7's fifteen concepts are out of reach and the code says why.** Multi-objective
 needs a Pareto front that is not built; stability margin needs slice 14's terrain; and
