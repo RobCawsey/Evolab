@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Evolab — slice 11</title>
+    <title>Evolab — slice 12</title>
     <link rel="icon" href="data:," />
     <style>
       :root {
@@ -415,6 +415,48 @@
       .gd-note { margin: 2px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dim); }
       button.wide { width: 100%; }
       button.ghost { background: transparent; color: var(--dim); }
+
+      /* Saved runs — slice 12. Absent from the guided flow, like every other server thing. */
+      .rn-list { display: flex; flex-direction: column; }
+      .rn-row { display: flex; align-items: stretch; border-top: 1px solid var(--line); }
+      .rn-open {
+        flex: 1; min-width: 0; text-align: left; border: 0; border-radius: 0;
+        background: transparent; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;
+      }
+      .rn-open:hover { background: var(--panel2); }
+      .rn-t {
+        font-size: 12px; color: var(--text); overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      .rn-m { font-size: 10.5px; color: var(--faint); }
+      .rn-share {
+        border: 0; border-radius: 0; border-left: 1px solid var(--line);
+        background: transparent; color: var(--dim); font-size: 11px; padding: 0 9px;
+      }
+      .rn-share:hover { color: var(--amber); }
+
+      /*
+        The failure indicator — Fig 9.9. Hidden until there is something to report, because a
+        working server has to look exactly like no server at all.
+      */
+      .err-dot {
+        width: 9px; height: 9px; padding: 0; border-radius: 50%;
+        background: var(--amber); border: 0; cursor: pointer; flex: none;
+      }
+      .err-pop {
+        position: absolute; top: 41px; right: 10px; z-index: 45; width: 330px; max-width: 90vw;
+        background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
+        padding: 9px; box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+      }
+      .err-row { padding: 8px 2px; border-bottom: 1px solid var(--line); }
+      .err-row:last-of-type { border-bottom: 0; }
+      .err-row .code { font-family: var(--mono); font-size: 11px; color: var(--bad); }
+      .err-row .when { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+      .err-row p { margin: 2px 0 0; font-size: 11.5px; color: var(--text); line-height: 1.45; }
+      .err-row .meta {
+        font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 3px;
+        overflow: hidden; text-overflow: ellipsis;
+      }
       .seg.wide { width: 100%; }
       .seg.wide button { flex: 1; }
 
@@ -580,6 +622,8 @@
           the spread is what the search found rather than what it was told to look for. Click a
           cell to load that gait into the sliders.
         </div>
+        <div id="runs" class="explorer-only"></div>
+
         <div class="ph">Champion</div>
         <div class="stats">
           <div class="kv"><span>distance</span><b class="am" id="c-dist">—</b></div>

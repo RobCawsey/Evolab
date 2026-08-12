@@ -9,6 +9,8 @@
  * Node like everything else that matters. What is left is one `fetch` wrapper.
  */
 
+export type { ApiError, ApiResult } from './types.ts';
+
 import {
   CLIENT_CODES,
   type ApiError,

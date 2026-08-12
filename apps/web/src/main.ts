@@ -51,6 +51,10 @@ import {
   spawnPool, type AppStage,
 } from './run/state.ts';
 import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
+import { api, reportFailure, reported } from './net/api.ts';
+import { createFailureIndicator, createRunsPanel } from './net/panel.ts';
+import { defaultTitle, runPayload } from './net/serialise.ts';
+import type { RunSummary } from './net/types.ts';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const stage = el<HTMLCanvasElement>('stage');
@@ -143,6 +147,7 @@ function startPool(): void {
       offerFirst(state, summary);
       if (offerChampion(state, summary)) {
         el('btn-adopt').removeAttribute('disabled');
+        paintRuns();
         if (state.history.length <= 1) setMode('evolved');
         else if (state.mode === 'evolved') respawn();
       }
@@ -772,6 +777,151 @@ el('btn-challenges').addEventListener('click', () => {
   }
 });
 
+/* ---------------- the server, when there is one ---------------- */
+
+/**
+ * Slice 12's browser half. **Nothing here is on a critical path.**
+ *
+ * Evolving, replaying, scrubbing and the challenge track never wait for a response, no call
+ * throws, and with no server running the panel says so once and the app behaves exactly as it
+ * did for eleven slices. `reported()` records every failure for the Fig 9.9 indicator and
+ * hands the result straight back, so call sites stay one line.
+ */
+createFailureIndicator(document.querySelector('header')!);
+
+let savedRuns: RunSummary[] | null = null;
+let saving = false;
+
+const runsPanel = createRunsPanel(el('runs'), {
+  onSave: () => void saveCurrentRun(),
+  onOpen: (id) => void openSavedRun(id),
+  onShare: (id) => void shareRun(id),
+});
+
+function paintRuns(): void {
+  runsPanel.show(savedRuns, saving, state.champion !== null);
+}
+
+/** Fire-and-report. The list is a nicety; failing to fetch it is not worth a word on screen. */
+async function refreshRuns(): Promise<void> {
+  const result = await api.listRuns();
+  savedRuns = result.ok ? result.data.slice() : null;
+  if (!result.ok) reportFailure(result.error);
+  paintRuns();
+}
+
+async function saveCurrentRun(): Promise<void> {
+  const champion = state.champion;
+  const result0 = champion?.summary.bestResult;
+  if (!champion || !result0 || saving) return;
+
+  saving = true;
+  paintRuns();
+
+  const body = runPayload({
+    title: defaultTitle(state.preset.name, result0.distance),
+    seed: state.seed,
+    generations: state.pool && Number.isFinite(state.pool.generation) ? state.pool.generation : 0,
+    population: state.population,
+    trialSeconds: state.trialSeconds,
+    workers: state.workers,
+    goalKey: state.preset.key,
+    objective: state.preset.objective,
+    bodySpec: encodeSpec(spec),
+    championGenome: encodeGait(champion.params),
+    championFitness: champion.fitness,
+    champion: result0,
+    archive: state.pool?.archive ?? null,
+    history: state.history,
+  });
+
+  const saved = reported(await api.saveRun(body));
+  saving = false;
+
+  if (saved.ok) {
+    runsPanel.note('Saved. It will be here next time, on this server.');
+    await refreshRuns();
+  } else {
+    // The run is still in the browser, which is the thing worth saying — the indicator
+    // carries the detail for anyone who wants it.
+    runsPanel.note('Could not save that run. It is still here — try again later.');
+    paintRuns();
+  }
+}
+
+/**
+ * Load a stored run back onto the stage.
+ *
+ * Restores the body, the champion gait and the chart — the three things that make a run
+ * recognisable. The behaviour archive is **not** restored into the pool: the pool's archive
+ * is an observation of a live search, and filling it from a file would make coverage a claim
+ * about a search that is not running.
+ */
+async function openSavedRun(id: string): Promise<void> {
+  const result = reported(await api.getRun(id));
+  if (!result.ok) {
+    runsPanel.note('Could not open that run.');
+    return;
+  }
+  const run = result.data;
+
+  spec = clampSpec(decodeSpec(run.bodySpec, DEFAULT_SPEC));
+  morph = buildBiped(spec);
+  poolStale = true;
+  stepper.retarget(morph);
+
+  state.seed = run.seed;
+  state.trialSeconds = run.trialSeconds;
+  state.manualGait = decodeGait(run.championGenome, defaultGait());
+  state.history = run.history.map((p) => ({
+    generation: p.generation, best: p.best, mean: p.mean, worst: p.mean, diversity: p.diversity,
+  }));
+
+  panel.sync(state.manualGait);
+  editor.update(spec, state.champion !== null);
+  setMode('manual');
+  runsPanel.note(`Opened "${run.title}". The gait is in the sliders; press Run to evolve from here.`);
+  queueUrl();
+}
+
+async function shareRun(id: string): Promise<void> {
+  const result = reported(await api.publishRun(id));
+  if (!result.ok) {
+    runsPanel.note('Could not make a link for that run.');
+    return;
+  }
+  const link = `${location.origin}/?shared=${result.data.token}`;
+  void navigator.clipboard?.writeText(link).catch(() => {});
+  runsPanel.note('Read-only link copied. Anyone with it can watch this gait.');
+  await refreshRuns();
+}
+
+/**
+ * `?shared=<token>` — the read-only view §10 asks for and §5 can actually deliver.
+ *
+ * A finished run, replayed, with no account and no history. Not live: §5 deleted SignalR
+ * along with the cloud islands, so a phone cannot subscribe to a desktop session. The slice
+ * 12 notes settle that in favour of §5 and mark §10 for amendment.
+ */
+async function openSharedRun(token: string): Promise<void> {
+  const result = reported(await api.getShared(token));
+  if (!result.ok) {
+    runsPanel.note('That link is not valid any more.');
+    return;
+  }
+  const run = result.data;
+  spec = clampSpec(decodeSpec(run.bodySpec, DEFAULT_SPEC));
+  morph = buildBiped(spec);
+  state.manualGait = decodeGait(run.championGenome, defaultGait());
+  state.history = run.history.map((p) => ({
+    generation: p.generation, best: p.best, mean: p.mean, worst: p.mean, diversity: p.diversity,
+  }));
+  panel.sync(state.manualGait);
+  setStage('explorer');
+  setMode('manual');
+  runsPanel.note(`Watching "${run.title}" — ${run.championDistance.toFixed(1)} m, shared read-only.`);
+}
+
 /* ---------------- frame ---------------- */
 
 function fit(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, dpr: number): void {
@@ -1055,6 +1205,12 @@ async function boot(): Promise<void> {
   startPool();
   setMode('manual');
   queueUrl();
+
+  // Both are fire-and-forget. With no server they fail, get recorded for the indicator, and
+  // change nothing else — which is the whole rule of this slice.
+  const shared = params.get('shared');
+  if (shared) void openSharedRun(shared);
+  void refreshRuns();
   requestAnimationFrame(frame);
 }
 

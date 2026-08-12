@@ -18,6 +18,30 @@ implementation guide and the code disagree, the code wins and the guide is stale
 
 ## Current state
 
+**Slice 12 — "The server".** One ASP.NET Core project (net9.0, not §5's net10) serving the
+built SPA at one origin, storing runs in SQLite and trajectories as content-addressed files.
+Save a run, list them, reopen one, publish a read-only `?shared=<token>` link.
+
+**The app works with no server at all, and that is measured.** Server killed mid-session:
+thirty generations still evolved, **zero unhandled rejections**, no dialog, and one amber dot
+in the toolbar. `npm run dev`/`test`/`evolve` need no .NET; `dotnet test` needs no Node.
+
+**`api.ts` never throws**, so there is no `try`/`catch` anywhere else. Offline, timeout, 404,
+500, an HTML error page from a proxy and a 200 with unparseable JSON all become an
+`ApiResult` — the last two are the ones that get skipped and both have tests. Five-second
+`AbortController` on every request: a hanging one gives neither an error to report nor a
+result to use.
+
+**Fakes prove endpoint behaviour and cannot prove persistence behaviour.** Eleven endpoint
+tests passed against fakes while listing was broken in real SQL — SQLite refuses to
+`ORDER BY` a `DateTimeOffset`, and the fake sorts one happily in LINQ-to-Objects. The server
+500'd the first time it was run by hand. `CreatedAt` is UTC ticks now and `RepositoryTests`
+uses real in-memory SQLite; mutation-tested.
+
+**Runtime state never goes inside the source tree.** The data directory defaulted to
+`ContentRootPath/data`, which on a case-insensitive filesystem *is* the source folder
+`Data/` — a `rm -rf data` destroyed three uncommitted files. It lives in `server/.data` now.
+
 **Slice 11 — "Challenge track".** Eleven cards in the left column, each naming the concept it
 teaches, each configuring the app in one click. Nothing is locked — cards past the frontier
 are dimmed as guidance and stay clickable, and a completed card is never dimmed.
@@ -200,37 +224,16 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-Next: slice 12 — the server, now written out in full in
-[docs/implementation.md](docs/implementation.md#slice-12--the-server).
+Next: slice 13 — the community archive. Sketched in
+[docs/implementation.md](docs/implementation.md#slices-1314--later-stages); write it out first.
 
-**Errors are data, never control flow.** The server sends RFC 9457 `ProblemDetails` with a
-stable `code` extension and real HTTP status codes; `api.ts` turns every failure — offline,
-timeout, non-2xx, unparseable 200 — into an `ApiResult<T>` and **never throws**, so there is
-no `try`/`catch` anywhere else in the app. Failures are recorded to a small ring and surfaced
-as one quiet toolbar indicator, not a dialog.
+It is the smallest slice left and most of it exists: `archiveMerge` already folds four island
+maps into one, and the only new part is that the maps arrive over HTTP rather than over
+`postMessage`. Slice 12 already stores every filled cell of every saved run.
 
-**The rule that slice turns on: the app must work with no server at all** — not degrade,
-work exactly as today. Every call is an enhancement, every failure is silent, `npm run dev`
-and `npm test` keep working with .NET not installed.
-
-**§5 and §10 contradicted each other and the spec settles it.** §10 has a phone *subscribing*
-to a live run; §5 deletes SignalR because there are no cloud islands. Monitor mode becomes
-*view a finished run, read-only*, which the share-token endpoint already gives — and §10 wants
-an amendment saying so.
-
-§5's own warning is worth re-reading before starting: a C# developer will want to start here,
-and the failure mode is not writing a bad server but an excellent one for a client that does
-not exist. If the server ever takes longer than the browser feature it enables, stop and write
-the browser feature.
-
-**Three of §7's fifteen concepts are out of reach and the code says why.** Multi-objective
-needs a Pareto front that is not built; stability margin needs slice 14's terrain; and
-**symmetry is impossible by construction** — `gaitTargets` reads `params[joint.kind]`, so both
-legs share one amplitude, phase and centre and this robot cannot limp. That is the price of
-the eleven-gene transferable genome, and it is worth paying.
-
-Slice 11 was the first slice since 6 that added **teaching** rather than instrumentation, and
-the curriculum is now the thing that ties the instrument together.
+**§10 still wants its amendment.** Monitor mode is *view a finished run, read-only* — what
+`?shared=<token>` now does — and not the live subscription Fig 10.1 describes, because §5
+deleted SignalR along with the cloud islands.
 
 Slice 8 was the natural stopping point. Everything from here changes how the search is
 watched, not how it works.
@@ -312,7 +315,7 @@ npm run check        # typecheck everything
 npm run sim          # headless: step the biped in Node, print positions
 ```
 
-`npm test` is 211 tests in about 1.5 s, so there is no excuse for not running it. It covers
+`npm test` is 244 tests in about 1.5 s, so there is no excuse for not running it. It covers
 the RNG (including a pinned golden vector), the controller, the morphology, the archive, the
 trajectory recording, and the physics — the last of these builds real Rapier worlds and is
 still fast enough to sit in the inner loop. It also covers `render/three/bodies.ts` under

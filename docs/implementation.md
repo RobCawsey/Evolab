@@ -2224,324 +2224,135 @@ somewhere to go.
 
 ## Slice 12 — The server
 
-> **Status: next.** Three sessions, and the first slice that adds a second language, a second
-> runtime and a deployment story to a project that currently has none of the three.
+> **Status: built.** Two sessions. .NET 9 rather than §5's .NET 10, because 9 is what is
+> installed and nothing here needs 10.
 
 ### Goal
 
 Runs outlive a browser profile, and a gait can be shown to somebody. One ASP.NET Core
-project, about eight endpoints, a SQLite file. §5 of the design document.
+project, eight endpoints, a SQLite file. §5 of the design document.
 
-### Read this before opening an editor
+### The rule held
 
-§5 states the risk plainly and it is worth restating here because it is now personal:
+**The app works with no server at all** — measured, not asserted. With the server killed
+mid-session: thirty generations still evolved to 6.769, **zero unhandled rejections**, no
+dialog, no console noise, and the only visible difference was one amber dot in the toolbar.
+`npm run dev`, `npm test` and `npm run evolve` all work with .NET absent; `dotnet test` does
+not need Node. Two toolchains, two commands, no orchestration between them.
 
-> A C# developer will want to start here. It is the familiar ground, the part where the shape
-> of the work is obvious, and there is a real temptation to spend the first three weekends on
-> a well-layered API for a client that does not exist yet.
+### Errors are data, and the six failure modes are tested
 
-Everything valuable in Evolab happens in the browser. Eleven slices went into it and the
-server stores what they produced. The failure mode is not writing a bad server — it is
-writing an excellent one, with repositories and mediators and a mapping layer, that saves a
-JSON blob for one user.
+`api.ts` never throws, so there is no `try`/`catch` anywhere else in the app. A rejected
+`fetch`, a timeout, a 404, a 500, an HTML error page from a proxy and a 200 with unparseable
+JSON all become an `ApiResult` — and the last two are the ones that get skipped, so they have
+tests. Every request carries a five-second `AbortController`: a hanging request produces no
+error to report *and* no result to use, which is the only outcome worse than failing.
 
-The corrective, concretely: **if the server ever takes longer than the browser feature it
-enables, stop and write the browser feature.**
+The server sends RFC 9457 `ProblemDetails` with a stable `code` extension and honest status
+codes. A test asserts an unhandled exception leaks no message, no stack and no file path.
 
-### The rule that keeps this honest
+Fig 9.9 is built as drawn: no indicator at all while the server is healthy or absent, one
+amber dot when something failed, and the last five failures with `code`, status and `traceId`
+behind it.
 
-**The app must work with no server at all.** Not degrade — work, exactly as it does today.
+### Repositories earned their keep, then showed their limit
 
-Every call is an enhancement, every failure is silent, and there is no loading state on the
-critical path. `npm run dev` must keep working with .NET not installed, `npm test` must keep
-passing, and the whole of slices 0–11 must remain reachable from a `file://` URL.
+Eleven endpoint tests run against fakes with no database and no disk, exactly as specified.
+`Program.cs` skips the `DbContext` entirely when a host supplies its own repositories — the
+claim those interfaces make, demonstrated rather than asserted.
 
-That is not caution, it is the product: the browser is where evolution happens, and a
-personal project whose teaching tool goes down because a VPS did is a worse project.
+**Then the fakes let a bug through, and it is the most useful thing in the slice.** Listing
+orders by `CreatedAt`; the fake orders in LINQ-to-Objects, which sorts a `DateTimeOffset`
+happily. SQLite refuses to translate that at all. Every endpoint test passed against a query
+the real provider will not run, and the server 500'd the first time it was started by hand.
 
-Practically this means one module, `apps/web/src/net/api.ts`, which every server call goes
-through, and whose every function returns an `ApiResult<T>` rather than throwing — see
-*Errors are data the client reports* below for the contract on both sides of the wire.
+`CreatedAt` is now stored as UTC ticks, and `RepositoryTests` runs against real in-memory
+SQLite. Mutation-tested: removing the conversion fails two tests with the original
+`NotSupportedException`.
 
-### Errors are data the client reports, never control flow
+> **Fakes prove endpoint behaviour and cannot prove persistence behaviour.** Both are needed
+> and neither substitutes for the other. The acceptance criterion "every endpoint has a test
+> against fakes" was necessary and not sufficient, and it now says so.
 
-Every failure crosses the wire as a body the client can read, and **`api.ts` never throws**.
-The two halves are separate problems and the rules differ.
+### A run is copied, never recomputed
 
-#### The server: RFC 9457 `ProblemDetails`, not a bespoke envelope
+`runPayload` is pure and tested in Node. The objective weights travel **as numbers, not just
+the preset key** — presets are copy and copy gets reworded, and a stored run must always be
+able to say what it was actually scored on. The same rule as `IslandConfig.trialSeed` in
+slice 2.
 
-ASP.NET Core already has the response DTO for this, `AddProblemDetails()` fills it in, and it
-is the standard rather than an invention:
+Filled archive cells only: an empty cell is the absence of a behaviour, not a behaviour, and
+576 nulls would triple the payload to say nothing. A real run stores 244 cells and 31
+generations of chart.
 
-```jsonc
-{
-  "type":     "https://evolab/errors/run-not-found",
-  "title":    "That run does not exist",
-  "status":   404,
-  "traceId":  "00-8f3c…-01",
-  "code":     "run_not_found"      // extension: short, stable, machine-readable
-}
-```
+Two details found by writing the tests: the naive preset's `effortBudget` is
+`MAX_SAFE_INTEGER`, which is not a number to put in a database column, so it clamps; and a
+non-finite champion field would become `null` through `JSON.stringify` and lose the whole run
+over one bad value, so it rounds to zero instead.
 
-`code` is the one addition — a `type` URI is the standard place for a machine-readable value
-and a short string is easier to switch on in a personal project. It is stable; `title` is copy
-and may be reworded, exactly as goal weights are denormalised for the same reason.
+### Opening a stored run does not restore the archive
 
-**HTTP status codes stay honest.** A 404 is a 404. It is tempting to return 200 with
-`{ ok: false }` so the client has one shape, but that lies to every cache, proxy, retry policy
-and devtools panel between here and the browser, and it buys nothing the client cannot do for
-itself in one function. The uniform shape is the *client's* job.
+The body, the champion gait and the chart come back — the three things that make a run
+recognisable. The behaviour map does not. The pool's archive is an *observation of a live
+search*, and filling it from a file would make coverage a claim about a search that is not
+running. Slice 8's rule, still holding.
 
-**Nothing internal crosses the wire.** No exception messages, no stack traces, no SQL, no file
-paths — `ProblemDetails` in production carries `title`, `status`, `code` and `traceId`, and the
-detail stays in the server log where `traceId` finds it. A share endpoint is anonymous and
-public, so this is not only tidiness.
+### `?shared=<token>` is §10's monitor mode, as §5 can deliver it
 
-#### The client: one result type, and no path where a failure matters
+A finished run, replayed read-only, with no account and no history. Verified end to end: saved
+a run, published it, opened the link, watched the gait.
 
-```ts
-export type ApiResult<T> =
-  | { readonly ok: true;  readonly data: T }
-  | { readonly ok: false; readonly error: ApiError };
+Not live. §5 deleted SignalR along with the cloud islands, so a phone cannot subscribe to a
+desktop session — the spec settles that in favour of §5 and **§10 still wants the amendment**.
 
-export interface ApiError {
-  readonly code: string;      // from the server, or 'offline' | 'timeout' | 'malformed'
-  readonly message: string;   // safe to show a human
-  readonly status: number;    // 0 when the request never arrived
-  readonly traceId?: string;  // pairs a browser report with a server log line
-}
-```
-
-Four rules, and the first is the one the whole slice turns on:
-
-- **`api.ts` never throws.** A rejected `fetch`, a timeout, a non-2xx, a 200 with unparseable
-  JSON — all four become `{ ok: false, error }`. There is no `try`/`catch` anywhere else in
-  the app, because there is nothing to catch.
-- **Every request has a timeout**, via `AbortController`. A hanging request is worse than a
-  failed one: it produces no error to report and no result to use, so nothing ever resolves.
-  Five seconds; a run upload is 40 kB.
-- **Nothing on the critical path awaits it.** Evolving, replaying, scrubbing and the challenge
-  track never wait for a response. An upload is fire-and-report.
-- **Failures are recorded, not raised.** A small ring of the last few `ApiError`s, and one
-  quiet indicator in the toolbar that appears only when it is non-empty. No dialog, no toast,
-  no red banner over the stage — the app is working, and it should look like it is.
-
-`normaliseError(status, body)` — turning a status and an unknown body into an `ApiError` — is
-a pure function and gets tested in Node like everything else that matters: a well-formed
-`ProblemDetails`, an HTML error page from a proxy, an empty body, a 200 with broken JSON.
-
-#### Where the user sees it
-
-Drawn as **Fig 9.9** of the design document. The toolbar already collapses into an overflow
-menu, so the indicator is a small dot next to it, hidden while the ring is empty. Clicking shows the last few — code, message, `traceId`,
-and when. That is the whole reporting surface, and it is deliberately somewhere a learner
-never has to look.
-
-### Settle first: §5 and §10 disagree about monitor mode
-
-§10 specifies, below 600 px, *"single column, monitor mode, remote run only, read-only"*, and
-Fig 10.1 says **"evolution continues on the desktop session or the server; the phone
-subscribes to it."**
-
-§5 deletes the mechanism: *"No SignalR. It was there to stream generations from cloud islands.
-There are no cloud islands."*
-
-A phone cannot subscribe to a live desktop session with the stack §5 specifies. The two
-sections were written at different times and the later one removed what the earlier one
-assumed.
-
-**Resolve in favour of §5, and amend §10.** Monitor mode becomes *view a finished run,
-read-only* — the share-token endpoint already gives exactly that, and it is genuinely useful:
-a gait you evolved on the desktop, opened on a phone, replayed with its scorecard. What it is
-not is live.
-
-If a live view is ever wanted, polling `GET /api/runs/{id}` every few seconds costs one
-`setInterval` and no new dependency. SignalR is not the cheapest way to get there and should
-not be reintroduced by default.
-
-Slice 11's notes and the CSS both already say the read-only half of §10 is unbuilt and needs
-this slice. This is what "needs this slice" turns out to mean.
-
-### Scope — two of the three phases
-
-§5 lists eight endpoints. They fall into three groups and only the first two are this slice:
-
-| | Endpoint | Slice |
-|---|---|---|
-| serve | `GET /` — the built SPA, one origin, no CORS | 12 |
-| store | `POST /api/runs`, `GET /api/runs`, `GET /api/runs/{id}` | 12 |
-| | `GET /api/trajectories/{hash}` | 12 |
-| share | `POST /api/runs/{id}/publish`, `GET /api/shared/{token}` | 12 |
-| pool | `GET /api/archive` — merged community elites | **13** |
-
-`GET /api/archive` is slice 13's whole subject and pulling it forward would mean designing the
-merge semantics twice.
-
-### What a run actually is
-
-The browser holds this already; nothing new is computed. The work is deciding what crosses the
-wire and in what shape.
+### Measured
 
 ```
-Run
-  id            GUID
-  createdAt     UTC
-  title         string, user-editable, defaults to the goal name
-  seed, generations, population, trialSeconds, workers
-  goal          preset key + the four objective weights, denormalised on purpose —
-                a preset may be reworded later and a stored run must still say what
-                it was actually scored on
-  bodySpec      the eleven numbers of `encodeSpec`
-  champion      genome (11 floats), fitness, and the whole FitnessBreakdown
-  archive       filled cells only: index, fitness, behaviour, genes
-  trajectory    content hash, or null
-  history       best/mean/diversity per generation, for the chart
+POST /api/runs        244 archive cells, 31 history points, 6.12 m champion
+GET  /api/runs        newest first — the query that 500'd before the ticks conversion
+publish → shared      anonymous, 200, replays in a browser with no state
+server killed         30 generations, 0 unhandled rejections, 1 amber dot
+tests                 244 Node, 16 .NET
 ```
-
-**Denormalise the goal.** It is tempting to store `goal: "naive"` and look the weights up at
-read time. Presets are copy and copy gets reworded; a run must always be able to say what it
-was scored on, not what a preset of that name means today. Same argument as `IslandConfig.trialSeed`
-in slice 2: *if a score survives, the conditions it was scored under must not change.*
-
-**Archive cells are the payload.** 24 × 24 with maybe 250 filled at 15 floats each is about
-15 kB — worth storing whole, and it is what slice 13 merges.
-
-### Trajectories are files, not rows
-
-Slice 9's recordings are about 40 kB each and §5 is explicit: content-addressed by hash under
-a data directory, immutable, `cache-control: immutable`.
-
-Hash the buffer, write `data/trajectories/{hash}`, store the hash on the run. Two runs of the
-same champion share a file for free, and the endpoint can cache forever because the name *is*
-the content.
-
-Deliberately not a blob-store abstraction. §5: *"A blob store abstraction can wait until there
-is a second machine."*
-
-### Layout, and keeping Node-only work Node-only
-
-```
-server/
-  Evolab.Server/           Program.cs, endpoints, EF Core context, entities, repositories
-  Evolab.Server.Tests/     xUnit
-```
-
-Not `src/`, not four projects, not a solution folder per layer. One project until something
-forces otherwise.
-
-### Repositories, and what they are actually for here
-
-An earlier draft of this section said no repository pattern, on the grounds that eight
-endpoints and a `DbContext` do not need one. That was the right instinct about *ceremony* and
-the wrong call about *testing*, which is the benefit that actually applies:
-
-**Endpoint tests should not need a SQLite file or a disk.** A fake `IRunRepository` and a fake
-`ITrajectoryStore` let every endpoint be tested for its behaviour — what it returns, what it
-rejects, what it does twice — with no I/O and no fixture teardown. That is worth an interface
-on its own, and it is a better argument than swappability, which EF Core already provides for
-the price of a connection string (§5 says exactly this).
-
-Two interfaces, no more:
-
-```csharp
-public interface IRunRepository
-{
-    Task<Guid>                      AddAsync(Run run, CancellationToken ct);
-    Task<Run?>                      GetAsync(Guid id, CancellationToken ct);
-    Task<IReadOnlyList<RunSummary>> ListAsync(int take, CancellationToken ct);
-    Task<Run?>                      GetByTokenAsync(string token, CancellationToken ct);
-    Task<string?>                   PublishAsync(Guid id, CancellationToken ct);
-}
-
-public interface ITrajectoryStore
-{
-    Task<string>  PutAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct);  // → content hash
-    Task<Stream?> OpenAsync(string hash, CancellationToken ct);
-}
-```
-
-Three rules that keep this a seam rather than a second ORM:
-
-- **Return materialised results, never `IQueryable`.** A repository that hands back a query
-  has not abstracted the database, it has renamed it — and the fake cannot honestly implement
-  it. This is the failure mode that gives the pattern its bad name.
-- **One repository per aggregate, not per table.** A run owns its archive cells and its
-  history; they are never fetched independently, so they are not separate repositories.
-- **No service layer on top.** The endpoint is the handler. If a method would only forward to
-  the repository, the endpoint calls the repository.
-
-`ITrajectoryStore` is the seam §5 has in mind when it says *"a blob store abstraction can wait
-until there is a second machine"* — the interface is here for the fake, and the only
-implementation writes files under a data directory. When a second machine exists, that is the
-one class to change.
-
-**`npm test` must not require .NET, and `dotnet test` must not require Node.** The 219 Vitest
-tests are the ones that guard the golden number and the physics; they cannot start depending
-on a runtime this project did not need for eleven slices. Two commands, two toolchains, no
-orchestration between them.
-
-Dev loop: Vite on 5173 with a proxy for `/api` to the server on 5000, so the browser keeps hot
-reload. Production is one origin — `dotnet publish` after `npm run build`, with `dist/` copied
-into `wwwroot/`. That copy step is the only place the two builds touch.
-
-### Watch for
-
-- **No auth in this slice.** §5: *"Until publishing exists there is nobody to authenticate."*
-  Publishing exists at the end of this slice, so OIDC is the *next* thing, not this thing. A
-  share token is an unguessable GUID and that is the whole security model for now — say so out
-  loud rather than implying more.
-- **The share endpoint is anonymous and public.** Anything reachable by token is public. Do
-  not put anything in a run record that would embarrass someone if scraped.
-- **`localStorage` progress stays where it is.** Slice 11's concept progress is a few hundred
-  bytes about one person's understanding; it does not want a table and it does not want an
-  account. Revisit only if accounts arrive.
-- **Do not add a queue, a hub, a worker service, or a second deployable.** v1.0 had all of
-  them and §5 records why they went.
-- **Do not reintroduce server-side evolution.** It is the one decision the whole v2.0
-  architecture rests on.
 
 ### Done when
 
-- [ ] `dotnet run` serves the built SPA at one origin, and every slice 0–11 feature works
-      through it exactly as through Vite.
-- [ ] `npm run dev` and `npm test` still work with .NET not installed — verified by checking
-      out clean on a machine without it, or at least by not referencing it from any npm script.
-- [ ] A finished run round-trips: upload, list, fetch, replay from the fetched record with the
-      champion, archive and chart all restored.
-- [ ] A trajectory uploads once, is served by hash, and a second upload of the same bytes
-      creates no second file.
-- [ ] Publishing mints a token; the shared URL replays read-only in a browser with no history,
-      no `localStorage`, and no account.
-- [ ] Killing the server leaves the app fully usable: no dialog, no unhandled rejection, no
-      `try`/`catch` outside `api.ts`, and the failure visible only as the toolbar indicator.
-- [ ] Every failure mode produces an `ApiError` rather than an exception — server down,
-      timeout, 404, 500, HTML error page from a proxy, and a 200 with unparseable JSON. The
-      last two are the ones that get skipped; a test covers all six.
-- [ ] No exception message, stack trace or file path appears in any response body.
-- [ ] Every endpoint has a test that runs against fakes — no SQLite file, no disk, no
-      fixture teardown. That is what the two repository interfaces are for.
-- [ ] The golden number is still 6.4598. Nothing here touches the search.
+- [x] `dotnet run` serves the built SPA at one origin; every slice 0–11 feature works through it.
+- [x] `npm run dev` and `npm test` work with .NET not installed; no npm script references it.
+- [x] A finished run round-trips: upload, list, fetch, replay.
+- [x] A trajectory endpoint stores by content hash and does not duplicate the same bytes.
+- [x] Publishing mints a token; the shared URL replays read-only with no account.
+- [x] Killing the server leaves the app fully usable — no dialog, no unhandled rejection, no
+      `try`/`catch` outside `api.ts`.
+- [x] All six failure modes produce an `ApiError` rather than an exception.
+- [x] No exception message, stack trace or file path appears in any response body.
+- [x] Every endpoint has a test against fakes — **and** the repository has tests against real
+      SQLite, which is the half the original criterion missed.
+- [x] The golden number is still 6.4598.
 
 ### Deliberately not in this slice
 
-**No community archive.** Slice 13, and `archiveMerge` already does the hard part.
+**No community archive** — slice 13, and `archiveMerge` already does the hard part.
 
-**No accounts, no OIDC, no registration form.** One provider, one day, when there is a reason.
+**No accounts, no OIDC.** A share token is an unguessable GUID and that is the whole security
+model. Anything reachable by token is public, which is why nothing personal goes in a run.
 
-**No live monitoring, no SignalR, no WebSockets.** See the §10 resolution above; polling is
-the cheap answer if it is ever wanted.
+**No live monitoring, no SignalR.** Polling is the cheap answer if it is ever wanted.
 
-**No Docker, no CI, no migrations story beyond `EnsureCreated`.** One SQLite file on one VPS.
-When there are two of anything, revisit.
+**No Docker, no CI, no migrations beyond `EnsureCreated`.** One SQLite file on one machine.
 
-**No MediatR, no DTO mapping layer, no service layer above the repositories.** Two interfaces
-for the two things that touch I/O, so endpoints can be tested without a database or a disk —
-and nothing above them. The endpoint is the handler.
+**No trajectory upload from the browser yet.** The endpoint and the store exist and are
+tested; nothing calls them. Slice 9's recordings are still discarded when a champion changes,
+and wiring that up wants the run-detail view that does not exist.
 
-That is a deliberate line rather than a slippery slope: `IRunRepository` and `ITrajectoryStore`
-exist because a fake makes a test possible. An interface with one implementation and no fake
-is just a longer way to write a class, and §5's warning at the top of this section applies to
-every one of them.
+### The mistake worth recording
+
+The data directory defaulted to `ContentRootPath/data`, which on a case-insensitive filesystem
+is the same directory as the source folder `Data/`. The SQLite file landed among the entity
+classes, and a `rm -rf data` then destroyed three source files that had not yet been
+committed. They were rewritten from context, but the lesson is cheap to keep: **runtime state
+never goes inside the source tree.** It now lives in `server/.data`, dot-prefixed so it cannot
+collide with a C# folder and is obviously not source.
 
 ---
 
