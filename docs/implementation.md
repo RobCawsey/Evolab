@@ -241,6 +241,7 @@ and how to drive it; it does not know what a population is.
 | 13 | [Community archive](#slice-13--community-archive) | 1 | **complete** |
 | 14 | [Task suite](#slice-14--task-suite) | 3 | **complete** |
 | 15 | [Help](#slice-15--help) | 1 | **complete** |
+| 16 | [Reopen and replay](#slice-16--reopen-and-replay) | 1 | next |
 
 **Slices 0–3 are the spine.** They end with a genetic algorithm evolving a gait while you
 watch a fitness curve climb. Everything after slice 3 is enrichment and can be reordered or
@@ -3077,6 +3078,153 @@ reader the real panel in one click instead.
 - [x] Each panel header carries a `?` that opens help at its own paragraph — seven of them,
       verified in the browser landing on the right heading each time.
 - [x] 314 tests, golden 6.4598 unchanged.
+
+---
+
+## Slice 16 — Reopen and replay
+
+> **Status: specified.** One session. Closes the gap carried since slice 12 — but not the way
+> slice 12 assumed it would be closed.
+
+### Goal
+
+A saved or shared run comes back with its **scrubber, its 3D replay and its three gait-analysis
+panels**. Today it comes back with a gait in the sliders and nothing to scrub.
+
+The gap has always been described as "nothing uploads a trajectory yet". That framing assumed the
+recording had to travel. It does not: the simulation is deterministic and the run record already
+stores the genome, the body, the seed and the trial length. **The browser can recompute the
+recording in about fifteen milliseconds.**
+
+### Most of this already exists
+
+`respawn()` recomputes a recording every time the champion changes:
+
+```ts
+const taped = evaluateGait(morph, activeGait(state), {
+  seed: state.seed, seconds: state.trialSeconds, record: true,
+});
+recording = taped.recording;
+scrubber.attach(recording.frames, recording.hz);
+```
+
+That is the whole mechanism. A reopened run does not use it for one reason: `openSavedRun` ends
+with `setMode('manual')`, and manual mode takes the live-`Sim` path, which has no recording and
+therefore no scrubber and no gait strip.
+
+So the work is **not** to build a replay path. It is to restore a run as a *champion* rather than
+as slider contents, and then to prove that what gets recomputed is what was saved.
+
+### The bug found while specifying this
+
+`spawnPool` never sets `trialSeed`, so it falls through to `DEFAULT_CONFIG.trialSeed = 0`. Every
+genome in every island is **scored** at trial seed 0. Meanwhile `respawn()` recomputes the replay
+at `seed: state.seed`, which is 4417 by default.
+
+The champion you watch is therefore a different trial from the one that produced the numbers
+printed beside it:
+
+```
+seed   distance   upright   stride   duty
+0        5.9394      4.00   0.9200  0.7992     <- scored: what the panel reports
+4417     5.9751      4.00   0.9244  0.8028     <- replayed: what you actually watch
+```
+
+Small, and exactly the shape of the bug slice 10 already fixed once, when an eight-second
+recording of a four-second trial made the footfall diagram's duty factor disagree with the
+behaviour map cell beside it. The rule that came out of that: **the replay must be the run that
+produced the numbers next to it.**
+
+This has to be fixed before anything else in the slice, because the verification step below
+compares a recomputed trial against stored numbers. Left alone it would report a mismatch on
+every single run, for a reason that has nothing to do with what the mismatch is meant to detect.
+
+The fix is one line — `spawnPool` passes `trialSeed: state.seed` into the island config — and it
+**will move the golden number's neighbours**: every fitness in the app shifts slightly because
+trials now run at 4417 rather than 0. `npm run evolve` is unaffected, because the CLI builds its
+own island and the golden test pins that path. Confirm which numbers move before and after, and
+say so in the commit.
+
+### Restoring a run as a champion
+
+`state.champion` is `{ genes, fitness, params, summary }`, and four places reach through
+`champion.summary.bestResult` to get the trial numbers. A restored run has no
+`GenerationSummary` — it has a stored `TrialResult`-shaped set of fields — and **synthesising a
+fake summary is not acceptable**, because it would have to invent a mean, a diversity and an
+evaluation count that the panels might display.
+
+So `state.champion` gains `result: TrialResult | null` as a first-class field, the four call
+sites read that instead of reaching through the summary, and `summary` becomes optional — present
+for a champion that came from a live generation, absent for one that came out of storage.
+
+`openSavedRun` then ends with `setMode('evolved')` instead of `setMode('manual')`, and
+`respawn()` does the rest without knowing where the champion came from.
+
+### Verification is the point of the slice
+
+Recomputing is only honest if it reproduces what was saved, so the slice proves it rather than
+assuming it. The run record already stores `championDistance`, `championUpright`,
+`championEffort`, `championStride`, `championDuty` and `championFell`. The recomputed trial
+produces all six.
+
+**Compare them.** They are a checksum on the physics, and they cost nothing to check because the
+recomputation has to happen anyway.
+
+Tolerance is `1e-3`, because `serialise.ts` rounds to four decimals on the way out; anything
+larger than that is not rounding. Three outcomes:
+
+| | |
+|---|---|
+| **matches** | Silent. The replay is the run. |
+| **differs** | Replay still shown, with a line saying so: *"This run was saved under a different build of the physics. What you are watching is a re-simulation and no longer matches the numbers it was saved with."* |
+| **fell differs** | The same message, and it is the loud case — a run that walked and now falls is the physics having changed materially. |
+
+That message is the whole argument for recompute-over-upload made visible. Storing the bytes
+would have hidden the divergence; recomputing surfaces it.
+
+### What this deliberately does not do
+
+**Nothing is uploaded and no wire format is invented.** `POST /api/trajectories` and its
+content-addressed store stay exactly as they are — built, tested, and called by nothing. That is
+not an oversight to fix later; it is the correct end state unless runs ever need to be an
+archival record rather than a reproducible recipe. If that day comes, the endpoint is waiting and
+this slice's comparison already says when it would have mattered.
+
+**No trajectory is kept when a champion changes.** Recordings remain what they have always been:
+derived, cheap, and thrown away.
+
+### Shape of the work
+
+1. `run/state.ts` — `trialSeed: state.seed` in the pool config; `champion.result` as a field;
+   `summary` optional. Update the four call sites.
+2. `main.ts` — `openSavedRun` and `openSharedRun` restore the champion and switch to evolved mode.
+3. A pure `compareTrial(stored, recomputed, tolerance)` in `net/` returning the fields that
+   disagree, so the check tests in Node without a browser or a physics world.
+4. The message, in the runs panel note.
+
+### Done when
+
+- [ ] Opening a saved run gives a scrubber, a 3D view and the footfall / traces / portrait strip.
+- [ ] `?shared=<token>` does the same.
+- [ ] The replay is the trial that produced the numbers beside it — same seed, same length.
+- [ ] A run saved under different physics says so rather than quietly showing a different robot,
+      and there is a test that fabricates a mismatch and asserts the message appears.
+- [ ] `compareTrial` is pure and tested in Node.
+- [ ] Nothing calls the trajectory endpoint. It stays tested and unused.
+- [ ] The golden number is still 6.4598, and any in-app fitness that moved because of the seed
+      fix is named in the commit.
+
+### Deliberately not in this slice
+
+**No run-detail view.** Slice 12 said wiring up trajectories "wants the run-detail view that does
+not exist". Recomputing removes that dependency — the existing panels are the detail view.
+
+**No caching of the recomputed recording.** Fifteen milliseconds does not need a cache, and a
+cache would need invalidating when the body is edited.
+
+**No comparison of the archive.** Reopening still does not restore the behaviour map, for slice
+8's reason: the pool's archive is an observation of a live search, and filling it from a file
+would make coverage a claim about a search that is not running.
 
 ---
 

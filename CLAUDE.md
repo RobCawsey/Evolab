@@ -325,11 +325,20 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-**Every slice on the list is built.** Slices 0–14, and nothing after 14 was ever planned. What
-remains is the list of things deliberately left out, each recorded in its slice's *Deliberately
-not in this slice* section — the largest being that nothing uploads a trajectory yet, carried
-from slice 12: the endpoint and content-addressed store exist and are tested, and nothing calls
-them.
+**Every slice on the original list is built** — 0–14, plus 15 (help) and now 16 specified.
+
+Next: slice 16 — **reopen and replay**, written out in
+[docs/implementation.md](docs/implementation.md#slice-16--reopen-and-replay). It closes slice
+12's trajectory gap, but *not* by uploading anything: the simulation is deterministic and a run
+record already stores the genome, body, seed and length, so the recording is recomputed in about
+15 ms. The trajectory endpoint stays built, tested and called by nothing — deliberately.
+
+**Specifying it found a real bug.** `spawnPool` never sets `trialSeed`, so it falls through to
+`DEFAULT_CONFIG`'s 0 and every genome is *scored* at seed 0 — while `respawn()` replays at
+`state.seed`. Measured on the reference champion: 5.9394 m and duty 0.7992 scored, against
+5.9751 and 0.8028 replayed. The replay is a different trial from the numbers printed beside it,
+which is the same shape as the bug slice 10 fixed. It must go first, or the slice's physics
+check reports a mismatch on every run for the wrong reason.
 
 The five design-document amendments (§2, §4, §9, §10, §6) are the honest record of where the
 spec and the build disagreed. Three of them trace to one decision — the physics stayed 2D — and
