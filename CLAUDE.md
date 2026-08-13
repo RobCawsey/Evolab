@@ -325,21 +325,30 @@ session went into diagnosing "this biped cannot balance open-loop, that is a fun
 limit" when the actual cause was motor gains being 200× too small. The lesson recorded
 there is worth more than the fix.
 
-**Every slice on the original list is built** — 0–14, plus 15 (help) and now 16 specified.
+**Slice 16 — "Reopen and replay".** A saved or shared run comes back with its scrubber, its 3D
+replay and its gait-analysis strip. **Nothing is uploaded** — the trial is deterministic in the
+genome, body, seed and length, so the recording is recomputed in ~15 ms. The trajectory endpoint
+stays built, tested and called by nothing: 0 calls, 0 blobs. That is the end state, not an
+omission.
 
-Next: slice 16 — **reopen and replay**, written out in
-[docs/implementation.md](docs/implementation.md#slice-16--reopen-and-replay). It closes slice
-12's trajectory gap, but *not* by uploading anything: the simulation is deterministic and a run
-record already stores the genome, body, seed and length, so the recording is recomputed in about
-15 ms. The trajectory endpoint stays built, tested and called by nothing — deliberately.
+**The replay was a different trial from the numbers beside it.** `spawnPool` never set
+`trialSeed`, so it fell through to 0 while `respawn()` replayed at `state.seed` — 5.9394 m and
+duty 0.7992 scored against 5.9751 and 0.8028 replayed. Slice 10 fixed this exact shape once.
+Fixed first, because the slice compares a recomputation against stored numbers.
 
-**Specifying it found a real bug.** `spawnPool` never sets `trialSeed`, so it falls through to
-`DEFAULT_CONFIG`'s 0 and every genome is *scored* at seed 0 — while `respawn()` replays at
-`state.seed`. Measured on the reference champion: 5.9394 m and duty 0.7992 scored, against
-5.9751 and 0.8028 replayed. The replay is a different trial from the numbers printed beside it,
-which is the same shape as the bug slice 10 fixed. It must go first, or the slice's physics
-check reports a mismatch on every run for the wrong reason.
+**Three decimals is not enough to reproduce a trial.** A run saved minutes earlier recomputed to
+a stride of 0.804 against the stored 1.100 — not the physics, but `encodeGait` rounding to 3 dp,
+which is right for a URL and lossy for a re-simulation. `encodeGaitPrecise` at 6 dp for storage.
+*Where a number is rounded decides what it can still be used for* — the same lesson as slice
+13’s bin boundary.
 
+**A tolerance tighter than the storage can never be met.** `serialise.ts` rounds effort to one
+decimal and everything else to four, so the check is per-field at half the last stored digit.
+The note deliberately names no cause: a mismatch means the trial did not reproduce, and a lossy
+record is as likely as a physics change.
+
+**Every slice is built** — 0–16. What remains is the list of things deliberately left out, each
+recorded in its slice’s *Deliberately not in this slice* section.
 The five design-document amendments (§2, §4, §9, §10, §6) are the honest record of where the
 spec and the build disagreed. Three of them trace to one decision — the physics stayed 2D — and
 §6's second cut traces to a contact solver nobody could have predicted from a document.

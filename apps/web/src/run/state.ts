@@ -15,6 +15,7 @@ import {
   type Genome,
   type IslandConfig,
   type Morphology,
+  type TrialResult,
 } from '@evolab/evolution';
 import { IslandPool, defaultWorkerCount, type PoolEvents } from '../workers/pool.ts';
 import { DEFAULT_PRESET, type Preset } from './objectives.ts';
@@ -42,7 +43,22 @@ export interface HistoryPoint {
 export interface RunState {
   pool: IslandPool | null;
   history: HistoryPoint[];
-  champion: { genes: Genome; fitness: number; params: GaitParams; summary: GenerationSummary } | null;
+  /**
+   * The best gait found, or the one restored from storage.
+   *
+   * `result` is a field rather than something reached for through `summary`, because a
+   * champion reopened from a saved run has a trial result and no summary — it never came from
+   * a generation. Synthesising one would mean inventing a mean, a diversity and an evaluation
+   * count that the panels might then display.
+   */
+  champion: {
+    genes: Genome;
+    fitness: number;
+    params: GaitParams;
+    result: TrialResult | null;
+    /** Absent when the champion was restored from storage rather than evolved this session. */
+    summary?: GenerationSummary;
+  } | null;
   running: boolean;
   target: number;
   seed: number;
@@ -73,7 +89,13 @@ export interface RunState {
    * Captured separately from champion because champion is overwritten the moment anything
    * beats it, and the whole point of step 4 is having the first attempt to compare against.
    */
-  firstChampion: { genes: Genome; fitness: number; params: GaitParams; summary: GenerationSummary } | null;
+  firstChampion: {
+    genes: Genome;
+    fitness: number;
+    params: GaitParams;
+    result: TrialResult | null;
+    summary?: GenerationSummary;
+  } | null;
   /** Generation of the slowest island at the last history sample. */
   lastRecorded: number;
   startedAt: number;
@@ -141,6 +163,17 @@ export function spawnPool(
         size: state.population,
         trialSeconds: state.trialSeconds,
         objective: state.preset.objective,
+        /**
+         * The seed every trial is scored under, and **the same one the replay uses**.
+         *
+         * Omitted until slice 16, which meant it fell through to `DEFAULT_CONFIG`'s 0 while
+         * `respawn()` recomputed the replay at `state.seed`. The champion on screen was
+         * therefore a different trial from the numbers printed beside it — measured on the
+         * reference champion, 5.9394 m and duty 0.7992 scored against 5.9751 and 0.8028
+         * replayed. The same shape as the bug slice 10 fixed, and the same rule settles it:
+         * the replay must be the run that produced the numbers next to it.
+         */
+        trialSeed: state.seed,
         // Spread last so a challenge card wins, and omitted keys fall through to
         // DEFAULT_CONFIG rather than to an explicit undefined.
         ...state.gaOverrides,
@@ -167,6 +200,7 @@ export function offerFirst(state: RunState, summary: GenerationSummary): void {
     genes: summary.bestGenome,
     fitness: summary.best,
     params: decodeGenome(summary.bestGenome),
+    result: summary.bestResult,
     summary,
   };
 }
@@ -184,6 +218,7 @@ export function offerChampion(state: RunState, summary: GenerationSummary): bool
     genes: summary.bestGenome,
     fitness: summary.best,
     params: decodeGenome(summary.bestGenome),
+    result: summary.bestResult,
     summary,
   };
   return true;

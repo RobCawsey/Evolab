@@ -154,13 +154,35 @@ function heading(text: string): HTMLElement {
  * in a query string. Order matches the genome layout in slice 2, deliberately.
  */
 export function encodeGait(p: GaitParams): string {
-  const n = [
+  return gaitNumbers(p).map((v) => v.toFixed(3)).join(',');
+}
+
+/**
+ * The same eleven numbers, at the precision a **recomputation** needs — slice 16.
+ *
+ * Three decimals is right for a URL, where brevity is the point and a gait only has to be
+ * recognisable. It is wrong for a stored run, because reopening one now re-simulates the trial
+ * from these numbers rather than downloading a recording, and three decimals is not enough to
+ * land on the same trial.
+ *
+ * Measured: a champion saved at three decimals recomputed to a stride of 0.804 against the
+ * 1.100 it was stored with. Stride is the most sensitive of the reported numbers because it
+ * comes from footfall timing, and a thousandth of a radian of phase is enough to merge two
+ * touchdowns into one. The same shape as slice 13's bin-boundary bug: rounding for the wire
+ * costs reproducibility, and the wire is not where the rounding belongs.
+ */
+export function encodeGaitPrecise(p: GaitParams): string {
+  return gaitNumbers(p).map((v) => v.toFixed(6)).join(',');
+}
+
+/** Order matches the genome layout in slice 2, deliberately. */
+function gaitNumbers(p: GaitParams): number[] {
+  return [
     p.frequency, p.balanceGain,
     p.hip.amplitude, p.hip.phase, p.hip.centre,
     p.knee.amplitude, p.knee.phase, p.knee.centre,
     p.ankle.amplitude, p.ankle.phase, p.ankle.centre,
   ];
-  return n.map((v) => v.toFixed(3)).join(',');
 }
 
 export function decodeGait(text: string, fallback: GaitParams): GaitParams {

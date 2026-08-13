@@ -15,11 +15,13 @@ import {
   clampSpec,
   decodeGenome,
   defaultGait,
+  encodeGenome,
   gaitPhase,
   Rng,
   type Archive,
   type BipedSpec,
   type GaitParams,
+  type TrialResult,
 } from '@evolab/evolution';
 import {
   evaluateGait, initPhysics, Sim, snapshotAt, stepControlled, TIMESTEP,
@@ -35,7 +37,7 @@ import { drawPortrait } from './render/gait/portrait.ts';
 import { plotRect, xToFrame } from './render/gait/common.ts';
 import type { OrbitHandle } from './render/three/controls.ts';
 import type { ThreeView } from './render/three/scene.ts';
-import { createSliders, encodeGait, decodeGait } from './ui/sliders.ts';
+import { createSliders, encodeGait, encodeGaitPrecise, decodeGait } from './ui/sliders.ts';
 import { createStepper } from './ui/stepper.ts';
 import { createToolbar } from './ui/toolbar.ts';
 import { attachHelpButtons, createHelp } from './ui/help/panel.ts';
@@ -57,11 +59,12 @@ import {
 import { generationsPerSecond, parallelSpeedup, trialsPerSecond } from './run/loop.ts';
 import { api, reportFailure, reported } from './net/api.ts';
 import { buildCommunity, overlapOf, type Community } from './net/community.ts';
+import { compareTrial, divergenceNote } from './net/compare.ts';
 import { createScorecardPanel } from './ui/scorecard.ts';
 import { runScorecard } from './workers/scorecard.ts';
 import { createFailureIndicator, createRunsPanel } from './net/panel.ts';
 import { defaultTitle, runPayload } from './net/serialise.ts';
-import type { RunSummary } from './net/types.ts';
+import type { RunRecord, RunSummary } from './net/types.ts';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const stage = el<HTMLCanvasElement>('stage');
@@ -249,6 +252,13 @@ const scratch = new Map<string, number>();
  * 2D nor the 3D view knows which one it is drawing.
  */
 let recording: Recording | null = null;
+/**
+ * The trial the current recording came from — slice 16.
+ *
+ * Kept because a run reopened from storage has to prove its recomputation still matches what
+ * was saved, and the trial that produced the frames on screen is the only thing that can say.
+ */
+let replayResult: TrialResult | null = null;
 let playFrame = 0;
 let playing = true;
 
@@ -266,6 +276,7 @@ function respawn(): void {
   sim?.dispose();
   sim = null;
   recording = null;
+  replayResult = null;
   accumulator = 0;
   focusX = 0;
   peakDistance = 0;
@@ -288,6 +299,7 @@ function respawn(): void {
       record: true,
     });
     recording = taped.recording;
+    replayResult = taped;
     scrubber.attach(recording.frames, recording.hz);
   }
   el('scrub').classList.toggle('on', recording !== null);
@@ -695,7 +707,7 @@ let runFinished = false;
  */
 function currentOutcome(): Outcome {
   const pool = state.pool;
-  const result = state.champion?.summary.bestResult ?? null;
+  const result = state.champion?.result ?? null;
   const archive = pool?.archive ?? null;
   const last = state.history[state.history.length - 1];
   return {
@@ -706,7 +718,7 @@ function currentOutcome(): Outcome {
     championStride: result?.strideLength ?? 0,
     championDuty: result?.dutyFactor ?? 0,
     championFell: result?.fell ? 1 : 0,
-    firstDistance: state.firstChampion?.summary.bestResult?.distance ?? 0,
+    firstDistance: state.firstChampion?.result?.distance ?? 0,
     firstFitness: state.firstChampion?.fitness ?? 0,
     generations: pool && Number.isFinite(pool.generation) ? pool.generation : 0,
     diversity: last?.diversity ?? 0,
@@ -937,7 +949,7 @@ async function refreshRuns(): Promise<void> {
 
 async function saveCurrentRun(): Promise<void> {
   const champion = state.champion;
-  const result0 = champion?.summary.bestResult;
+  const result0 = champion?.result;
   if (!champion || !result0 || saving) return;
 
   saving = true;
@@ -953,7 +965,7 @@ async function saveCurrentRun(): Promise<void> {
     goalKey: state.preset.key,
     objective: state.preset.objective,
     bodySpec: encodeSpec(spec),
-    championGenome: encodeGait(champion.params),
+    championGenome: encodeGaitPrecise(champion.params),
     championFitness: champion.fitness,
     champion: result0,
     archive: state.pool?.archive ?? null,
@@ -997,16 +1009,83 @@ async function openSavedRun(id: string): Promise<void> {
 
   state.seed = run.seed;
   state.trialSeconds = run.trialSeconds;
+  restoreRun(run);
+  runsPanel.note(openedNote(run));
+  queueUrl();
+}
+
+/**
+ * Put a stored run back on the stage as a **champion**, not as slider contents.
+ *
+ * That distinction is the whole of slice 16. A gait in the sliders replays live, frame by
+ * frame, and there is nothing to scrub — so a reopened run had no scrubber, no 3D playback and
+ * no gait-analysis strip. Restored as a champion, `respawn()` recomputes the recording exactly
+ * as it does for one that was just evolved, and every panel that needs frames gets them.
+ *
+ * **Nothing is downloaded.** The trial is deterministic in the genome, the body, the seed and
+ * the length, and a run record stores all four, so fifteen milliseconds of simulation is
+ * cheaper than a round trip and needs no wire format. `POST /api/trajectories` stays built,
+ * tested and called by nothing — see the slice 16 notes for why that is the end state and not
+ * an omission.
+ */
+function restoreRun(run: RunRecord): void {
+  spec = clampSpec(decodeSpec(run.bodySpec, DEFAULT_SPEC));
+  morph = buildBiped(spec);
+  poolStale = true;
+  stepper.retarget(morph);
+
+  state.seed = run.seed;
+  state.trialSeconds = run.trialSeconds;
   state.manualGait = decodeGait(run.championGenome, defaultGait());
   state.history = run.history.map((p) => ({
     generation: p.generation, best: p.best, mean: p.mean, worst: p.mean, diversity: p.diversity,
   }));
 
+  // No `summary`: this champion never came from a generation, and inventing one would mean
+  // inventing a mean, a diversity and an evaluation count the panels might display.
+  state.champion = {
+    genes: encodeGenome(state.manualGait),
+    fitness: run.championFitness,
+    params: state.manualGait,
+    result: null,
+  };
+
   panel.sync(state.manualGait);
-  editor.update(spec, state.champion !== null);
-  setMode('manual');
-  runsPanel.note(`Opened "${run.title}". The gait is in the sliders; press Run to evolve from here.`);
-  queueUrl();
+  editor.update(spec, true);
+  // Recomputes the recording, and leaves the trial it came from in `replayResult`.
+  setMode('evolved');
+  state.champion.result = replayResult;
+}
+
+/**
+ * What to say about a reopened run — and the check that makes recomputing defensible.
+ *
+ * The six champion fields a run stores are a checksum on the physics. Comparing them against
+ * the recomputation costs nothing, because the recomputation had to happen anyway, and it is
+ * the one thing replaying stored bytes could never have told you: that the simulation has
+ * changed since the run was saved.
+ */
+/** The six stored champion fields, against the trial the replay was actually built from. */
+function storedVsReplayed(run: RunRecord, replayed: TrialResult) {
+  return compareTrial({
+    distance: run.championDistance,
+    uprightTime: run.championUpright,
+    effort: run.championEffort,
+    strideLength: run.championStride,
+    dutyFactor: run.championDuty,
+    fell: run.championFell,
+  }, replayed);
+}
+
+function openedNote(run: RunRecord): string {
+  const opened = `Opened "${run.title}".`;
+  if (!replayResult) return `${opened} Press Run to evolve from here.`;
+
+  const note = divergenceNote(storedVsReplayed(run, replayResult));
+
+  return note === null
+    ? `${opened} Scrub the replay, or press Run to evolve from here.`
+    : `${opened} ${note}`;
 }
 
 /**
@@ -1052,16 +1131,16 @@ async function openSharedRun(token: string): Promise<void> {
     return;
   }
   const run = result.data;
-  spec = clampSpec(decodeSpec(run.bodySpec, DEFAULT_SPEC));
-  morph = buildBiped(spec);
-  state.manualGait = decodeGait(run.championGenome, defaultGait());
-  state.history = run.history.map((p) => ({
-    generation: p.generation, best: p.best, mean: p.mean, worst: p.mean, diversity: p.diversity,
-  }));
-  panel.sync(state.manualGait);
+  // Explorer first, so the panels the recomputed recording feeds are present when it lands.
   setStage('explorer');
-  setMode('manual');
-  runsPanel.note(`Watching "${run.title}" — ${run.championDistance.toFixed(1)} m, shared read-only.`);
+  restoreRun(run);
+
+  const note = replayResult ? divergenceNote(storedVsReplayed(run, replayResult)) : null;
+  runsPanel.note(
+    note === null
+      ? `Watching "${run.title}" — ${run.championDistance.toFixed(1)} m, shared read-only.`
+      : `Watching "${run.title}" — shared read-only. ${note}`,
+  );
 }
 
 /* ---------------- frame ---------------- */
@@ -1453,11 +1532,11 @@ function paintStats(): void {
   stat.speedup.textContent = pool?.trials ? `${parallelSpeedup(state).toFixed(1)}×` : '—';
   paintIslands();
 
-  const r = state.champion ? state.champion.summary.bestResult : null;
+  const r = state.champion ? state.champion.result : null;
   editor.update(spec, state.champion !== null);
   guided.update({
-    championDistance: state.champion?.summary.bestResult?.distance ?? null,
-    firstDistance: state.firstChampion?.summary.bestResult?.distance ?? null,
+    championDistance: state.champion?.result?.distance ?? null,
+    firstDistance: state.firstChampion?.result?.distance ?? null,
     generation: gen,
     target: state.target,
     running: state.running,
