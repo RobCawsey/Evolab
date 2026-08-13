@@ -240,7 +240,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
       <a href="#physics">5 — The physics layer</a>
       <a href="#app">6 — The application layer</a>
       <a href="#server">7 — The server</a>
-      <a href="#patterns">8 — Five patterns that repeat</a>
+      <a href="#patterns">8 — Six patterns that repeat</a>
       <a href="#tests">9 — How the tests are designed</a>
       <a href="#adding">10 — Adding something new</a>
     </div>
@@ -1778,6 +1778,13 @@ pre.code i{color:var(--ink-3);font-style:normal}
     search is running, which of the three stages the interface is in, which gait the sliders hold.
     There is no state-management library. For an application with one screen and one user, a
     plain object read by a render loop is the whole of what is needed.</p>
+    <p>One field in it is worth singling out, because it is where a type earned its optionality.
+    A champion carries its own <code>result</code> — the trial it scored — rather than reaching
+    through the <code>summary</code> of the generation that produced it. A champion restored from
+    a saved run has a result and <em>no summary</em>, because it never came from a generation, and
+    the alternative was to synthesise one. That would have meant inventing a mean, a diversity and
+    an evaluation count that the panels might then display, which is worse than an optional
+    field.</p>
   </div>
 
   <h3 style="font-size:22px;margin-top:34px"><code>workers/</code> — running the search off the main thread</h3>
@@ -2030,10 +2037,10 @@ pre.code i{color:var(--ink-3);font-style:normal}
 <!-- ============================= 8 ============================= -->
 <section id="patterns" style="margin-top:64px">
   <p class="eyebrow">08</p>
-  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">Five patterns that repeat</h2>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">Six patterns that repeat</h2>
 
   <div class="stack" style="max-width:76ch">
-    <p>Once you have seen these five, most of the codebase stops holding surprises.</p>
+    <p>Once you have seen these six, most of the codebase stops holding surprises.</p>
   </div>
 
   <h3 style="font-size:21px;margin-top:32px">1 — Pass the evaluator in</h3>
@@ -2142,7 +2149,94 @@ runSuite(morph, gait, <b>evaluateGait</b>)</pre>
     <p>In each case the interesting half is testable in Node and the untestable half is a dozen
     lines of <code>createElement</code>.</p>
   </div>
+
+
+  <h3 style="font-size:21px;margin-top:32px">6 — Store the recipe, not the result</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Reopening a saved run gives you a scrubber, a 3D replay and three gait-analysis panels. All
+    of those need a <strong>recording</strong> — the frame-by-frame trajectory from
+    <code>record.ts</code> — and none of it is downloaded.</p>
+    <p>The obvious design is to upload the recording when a run is saved and fetch it back when
+    the run is opened. The server has an endpoint for exactly that, content-addressed by SHA-256,
+    built and tested. <strong>Nothing calls it, and that is the design rather than an
+    omission.</strong></p>
+    <p>The reason is that a trial is deterministic in four things, and a saved run already stores
+    all four:</p>
+  </div>
+
+  <pre class="code"><i>// everything needed to reproduce the trial, already in the run record</i>
+run.championGenome   <i>// the gait</i>
+run.bodySpec         <i>// the robot</i>
+run.seed             <i>// the starting perturbation</i>
+run.trialSeconds     <i>// how long</i>
+
+<i>// so opening a run does this, in about fifteen milliseconds, instead of a round trip</i>
+<b>const</b> taped = evaluateGait(morph, gait, { seed, seconds, <b>record: true</b> });</pre>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Forty kilobytes and a binary format that would need versioning, against fifteen
+    milliseconds of arithmetic. The recording is <em>derived data</em>, and derived data is
+    cheaper to recompute than to keep in step.</p>
+  </div>
+
+  <div class="rule-card">
+    <span class="lbl">And the check that makes it defensible</span>
+    Recomputing is only honest if it reproduces what was saved, so the app verifies rather than
+    assumes. A run stores six numbers about its champion's trial — distance, time upright, effort,
+    stride, duty, whether it fell — and the recomputation produces all six.
+    <p style="margin-top:8px">Comparing them costs nothing, because the recomputation had to
+    happen anyway, and it is <strong>the one thing replaying stored bytes could never tell
+    you</strong>: that the simulation no longer produces what it did when the run was saved.
+    Stored frames always look right. A recomputation that disagrees is the only way the
+    divergence becomes visible at all.</p>
+  </div>
+
+  <h4 style="font-size:17px;margin-top:26px;color:var(--ink-2)">Two consequences, both found the hard way</h4>
+
+  <div class="stack" style="max-width:76ch">
+    <p><strong>Precision is part of a format's contract.</strong> The first end-to-end test of
+    this failed on a run saved minutes earlier: stride 1.100 when stored, 0.804 when recomputed.
+    Not the physics. The gait was written with <code>toFixed(3)</code>, which is correct for a URL
+    — where brevity is the point and a gait only has to be recognisable — and lossy for a
+    re-simulation. Recomputing from <code>1.999</code> when the value was <code>1.99937…</code>
+    lands on a different trial, and stride moves furthest because it comes from footfall timing,
+    where a thousandth of a radian of phase merges two touchdowns into one.</p>
+    <p>So there are now two encodings of the same eleven numbers: <code>encodeGait</code> at three
+    decimals for the URL, <code>encodeGaitPrecise</code> at six for storage. Same data, different
+    contracts.</p>
+  </div>
+
+  <div class="rule-card warn">
+    <span class="lbl">The rule, which has now been learned twice</span>
+    <strong>Where a number is rounded decides what it can still be used for.</strong> A gait
+    rounded for legibility cannot be re-simulated. A behaviour rounded for the wire cannot be
+    re-binned — that was the earlier one, where 244 archive cells were sent and 243 arrived
+    because a stride of 0.87499 stored as 0.8750 sits exactly on a bin boundary.
+    <p style="margin-top:8px">Both are the same mistake: treating rounding as presentation when it
+    is part of the interface.</p>
+  </div>
+
+  <div class="stack" style="max-width:76ch">
+    <p><strong>A tolerance can never be tighter than the storage.</strong> With the precision
+    fixed, one field still reported a difference — effort, at 62.500 stored against 62.534
+    recomputed. The serialiser rounds effort to <em>one</em> decimal while everything else gets
+    four, so a flat thousandth was unsatisfiable for it and would have declared every run diverged
+    for ever.</p>
+    <p>The tolerance is per-field now, at half the last stored digit, derived from how each field
+    is actually written rather than picked. A comparison whose threshold is finer than its inputs
+    is not strict — it is broken.</p>
+  </div>
+
+  <div class="rule-card">
+    <span class="lbl">One more, about what a message may claim</span>
+    When the check fires, the app says the run <em>does not replay exactly</em> and names the
+    field. An earlier draft said it had been "saved under a different build of the physics" — which
+    is one of two possible causes and, as the session proved, usually the wrong one: a record too
+    lossy to reproduce from looks identical from the outside. <strong>Report the observation, not
+    the diagnosis</strong>, unless the code can actually tell them apart.
+  </div>
 </section>
+
 
 <!-- ============================= 9 ============================= -->
 <section id="tests" style="margin-top:64px">
