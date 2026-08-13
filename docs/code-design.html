@@ -798,7 +798,298 @@ pre.code i{color:var(--ink-3);font-style:normal}
     than only refusing it.</p>
   </div>
 
-  <h3 style="font-size:22px;margin-top:34px"><code>operators.ts</code> — the genetic machinery</h3>
+  <h3 style="font-size:22px;margin-top:44px;padding-top:26px;border-top:2px solid var(--rule-2)">The three joint numbers, properly</h3>
+
+<div class="stack" style="max-width:76ch">
+  <p>Nine of the eleven genes are three numbers repeated for each of the three joint kinds:
+  <strong>amplitude</strong>, <strong>phase</strong> and <strong>centre</strong>. These are the
+  numbers on the sliders, the numbers the search is actually searching, and the ones that are
+  hardest to picture. This section is about nothing else.</p>
+
+  <p>Start from what a joint is doing. Each joint has one angle, and that angle changes over time.
+  If you plotted it you would get a wave — up, down, up, down, once per stride. The three numbers
+  are simply <em>three different ways of describing that wave</em>.</p>
+</div>
+
+<figure class="dg">
+  <svg viewBox="0 0 840 330" role="img" aria-label="Amplitude, centre and phase on a wave">
+    <!-- axes -->
+    <line x1="90" y1="30" x2="90" y2="250" stroke="var(--rule-2)"/>
+    <line x1="90" y1="250" x2="800" y2="250" stroke="var(--rule-2)"/>
+    <text class="xs" x="26" y="34">joint</text>
+    <text class="xs" x="26" y="48">angle</text>
+    <text class="xs" x="742" y="270">time →</text>
+
+    <!-- centre line -->
+    <line x1="90" y1="150" x2="800" y2="150" stroke="var(--cyan)" stroke-dasharray="5 4"/>
+    <text class="xs" x="806" y="154" fill="var(--cyan)">centre</text>
+
+    <!-- the wave -->
+    <path class="ar-a" fill="none" stroke-width="2.2"
+      d="M90 150 C 130 74, 170 74, 210 150 C 250 226, 290 226, 330 150
+         C 370 74, 410 74, 450 150 C 490 226, 530 226, 570 150
+         C 610 74, 650 74, 690 150 C 730 226, 770 226, 800 176"/>
+
+    <!-- amplitude bracket -->
+    <line x1="170" y1="86" x2="170" y2="150" stroke="var(--accent)" stroke-width="1.2"/>
+    <line x1="162" y1="86" x2="178" y2="86" stroke="var(--accent)" stroke-width="1.2"/>
+    <line x1="162" y1="150" x2="178" y2="150" stroke="var(--accent)" stroke-width="1.2"/>
+    <text class="xs" x="184" y="114" fill="var(--accent)">amplitude</text>
+
+    <!-- one cycle bracket -->
+    <line x1="210" y1="284" x2="450" y2="284" stroke="var(--ink-3)" stroke-width="1.2"/>
+    <line x1="210" y1="278" x2="210" y2="290" stroke="var(--ink-3)"/>
+    <line x1="450" y1="278" x2="450" y2="290" stroke="var(--ink-3)"/>
+    <text class="xs" x="256" y="302">one full cycle — set by frequency</text>
+
+    <!-- phase shift -->
+    <path fill="none" stroke="var(--violet)" stroke-width="1.6" stroke-dasharray="4 3"
+      d="M90 112 C 118 74, 158 90, 190 150 C 230 226, 270 226, 310 150
+         C 350 74, 390 74, 430 150 C 470 226, 510 226, 550 150
+         C 590 74, 630 74, 670 150 C 710 226, 750 226, 790 150"/>
+    <line x1="210" y1="150" x2="190" y2="150" stroke="var(--violet)" stroke-width="2"/>
+    <text class="xs" x="470" y="46" fill="var(--violet)">the same wave, shifted — that shift is phase</text>
+
+    <text class="xs" x="96" y="242">a joint that never moves is amplitude 0 — a flat line at its centre</text>
+  </svg>
+  <figcaption><b>Fig 4</b> One wave, three descriptions. <strong>Centre</strong> is the height of
+  the dashed line it swings about. <strong>Amplitude</strong> is how far above and below that line
+  it reaches. <strong>Phase</strong> slides the whole wave left or right in time without changing
+  its shape at all.</figcaption>
+</figure>
+
+<h4 style="font-size:18px;margin-top:30px;color:var(--ink-2)">Centre — where the joint sits</h4>
+<div class="stack" style="max-width:76ch">
+  <p>The easy one. It is the angle the joint holds on average, in radians, measured from the
+  robot's rest pose. If amplitude were zero, the joint would simply stay locked at this angle.</p>
+  <p>A knee with a centre of <code>-0.35</code> stands with its knee permanently bent about 20°.
+  A hip with a centre of <code>+0.1</code> holds its thigh slightly forward all the time. Changing
+  the centre changes the robot's <em>posture</em>.</p>
+</div>
+
+<h4 style="font-size:18px;margin-top:26px;color:var(--ink-2)">Amplitude — how big the movement is</h4>
+<div class="stack" style="max-width:76ch">
+  <p>Also easy. How far the joint swings either side of its centre, again in radians. Zero means
+  the joint does not move at all. Larger values mean bigger, sweepier motions.</p>
+  <p>Amplitude cannot be negative, and the reason is worth noticing: swinging by <code>-0.4</code>
+  would be identical to swinging by <code>+0.4</code> starting half a cycle later, which is
+  something <em>phase</em> can already express. Allowing both would mean two different genomes
+  producing exactly the same robot, and the search would waste its time exploring duplicates.</p>
+</div>
+
+<h4 style="font-size:18px;margin-top:26px;color:var(--ink-2)">Phase — the one that is genuinely hard</h4>
+
+<div class="rule-card">
+  <span class="lbl">The short answer</span>
+  Phase is <strong>not an angle the joint moves to</strong>. It is a <strong>time offset</strong>
+  — it says <em>when in the stride</em> this joint does its thing, relative to the clock. It is
+  measured in radians only because that is the unit the sine function wants; it means "how far
+  around the cycle to start".
+</div>
+
+<div class="stack" style="max-width:76ch">
+  <p>Everything else is measured in "how far". Phase is measured in "how late". That is why it
+  feels unlike the other two.</p>
+  <p>A full cycle is <code>2π</code>, about 6.28. So:</p>
+  <ul style="max-width:74ch;padding-left:22px;line-height:1.7">
+    <li><code>phase = 0</code> — start at the beginning of the cycle</li>
+    <li><code>phase = π/2</code> (1.57) — start a quarter of the way through</li>
+    <li><code>phase = π</code> (3.14) — start halfway through, i.e. exactly out of step</li>
+    <li><code>phase = 2π</code> (6.28) — a whole cycle late, which is the same as not late at all</li>
+  </ul>
+  <p>That last point is the strange and important one: <strong>phase wraps around</strong>. The
+  range in this project is <code>[0, 2π]</code>, and the two ends of that range mean the same
+  thing. A genome with a hip phase of 6.2 and one with a hip phase of 0.08 produce almost
+  identical robots, despite sitting at opposite ends of the gene's range.</p>
+</div>
+
+<div class="rule-card warn">
+  <span class="lbl">What that costs the search</span>
+  Crossover and mutation treat every gene as a plain number on a line, so they have no idea that
+  the two ends of a phase gene are neighbours. A parent at 0.05 and a parent at 6.2 are nearly
+  identical robots, but blending them produces a child at about 3.1 — which is half a cycle out
+  from <em>both</em> parents and typically falls over. This is a real, known limitation of encoding
+  a circular quantity as a linear gene, and the project accepts it: the search works around it by
+  finding a phase relationship that works and then staying near it.
+</div>
+
+<h4 style="font-size:18px;margin-top:30px;color:var(--ink-2)">Why phase is what makes it a walk</h4>
+
+<div class="stack" style="max-width:76ch">
+  <p>Amplitude and centre decide what a leg looks like. <strong>Phase decides whether it walks.</strong></p>
+  <p>Consider what a real leg does. On the way forward, the knee bends so the foot clears the
+  ground. On the way back, the knee straightens so the leg can take weight. The knee is doing the
+  same repetitive motion as the hip — just <em>at a different moment in the stride</em>.</p>
+  <p>If the hip and knee are given the same phase, they swing together: the knee bends exactly
+  when the leg swings forward and straightens exactly when it swings back, which is roughly the
+  opposite of useful. Offset them correctly and you get a step.</p>
+</div>
+
+<figure class="dg">
+  <svg viewBox="0 0 840 300" role="img" aria-label="One leg through four points of the cycle">
+    <g stroke-linecap="round">
+      <!-- 0% -->
+      <g transform="translate(70,40)">
+        <text class="xs" x="10" y="-14">start of cycle</text>
+        <line x1="40" y1="0" x2="40" y2="60" stroke="var(--ink)" stroke-width="5"/>
+        <line x1="40" y1="60" x2="62" y2="112" stroke="var(--accent)" stroke-width="4.5"/>
+        <line x1="62" y1="112" x2="58" y2="168" stroke="var(--accent)" stroke-width="4"/>
+        <line x1="58" y1="168" x2="76" y2="172" stroke="var(--accent)" stroke-width="5"/>
+        <line x1="0" y1="176" x2="120" y2="176" stroke="var(--rule-2)" stroke-width="1.5"/>
+        <text class="xs" x="14" y="200">hip forward,</text>
+        <text class="xs" x="14" y="214">knee bent</text>
+      </g>
+      <!-- 25% -->
+      <g transform="translate(260,40)">
+        <text class="xs" x="4" y="-14">a quarter through</text>
+        <line x1="40" y1="0" x2="40" y2="60" stroke="var(--ink)" stroke-width="5"/>
+        <line x1="40" y1="60" x2="44" y2="116" stroke="var(--accent)" stroke-width="4.5"/>
+        <line x1="44" y1="116" x2="42" y2="170" stroke="var(--accent)" stroke-width="4"/>
+        <line x1="42" y1="170" x2="60" y2="174" stroke="var(--accent)" stroke-width="5"/>
+        <line x1="0" y1="176" x2="120" y2="176" stroke="var(--rule-2)" stroke-width="1.5"/>
+        <text class="xs" x="10" y="200">planted,</text>
+        <text class="xs" x="10" y="214">taking weight</text>
+      </g>
+      <!-- 50% -->
+      <g transform="translate(450,40)">
+        <text class="xs" x="18" y="-14">halfway</text>
+        <line x1="40" y1="0" x2="40" y2="60" stroke="var(--ink)" stroke-width="5"/>
+        <line x1="40" y1="60" x2="22" y2="114" stroke="var(--accent)" stroke-width="4.5"/>
+        <line x1="22" y1="114" x2="20" y2="170" stroke="var(--accent)" stroke-width="4"/>
+        <line x1="20" y1="170" x2="38" y2="174" stroke="var(--accent)" stroke-width="5"/>
+        <line x1="0" y1="176" x2="120" y2="176" stroke="var(--rule-2)" stroke-width="1.5"/>
+        <text class="xs" x="4" y="200">hip back,</text>
+        <text class="xs" x="4" y="214">leg straight</text>
+      </g>
+      <!-- 75% -->
+      <g transform="translate(640,40)">
+        <text class="xs" x="0" y="-14">three quarters</text>
+        <line x1="40" y1="0" x2="40" y2="60" stroke="var(--ink)" stroke-width="5"/>
+        <line x1="40" y1="60" x2="30" y2="110" stroke="var(--accent)" stroke-width="4.5"/>
+        <line x1="30" y1="110" x2="52" y2="148" stroke="var(--accent)" stroke-width="4"/>
+        <line x1="52" y1="148" x2="70" y2="150" stroke="var(--accent)" stroke-width="5"/>
+        <line x1="0" y1="176" x2="120" y2="176" stroke="var(--rule-2)" stroke-width="1.5"/>
+        <text class="xs" x="0" y="200">knee bends —</text>
+        <text class="xs" x="0" y="214">foot clears ground</text>
+      </g>
+    </g>
+    <path class="ar-a" d="M180 250 L750 250" marker-end="url(#cd-j)"/>
+    <text class="xs" x="330" y="272">the knee's phase is what decides that this happens here, and not somewhere useless</text>
+    <defs>
+      <marker id="cd-j" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption><b>Fig 5</b> One leg through a stride. Every joint is running the same steady wave;
+  what makes this a walk rather than a twitch is that the knee's wave is offset from the hip's by
+  the right amount. That offset is the knee's phase.</figcaption>
+</figure>
+
+<h4 style="font-size:18px;margin-top:30px;color:var(--ink-2)">And the other leg</h4>
+
+<pre class="code"><i>/** Left and right run half a cycle apart. This is what makes it a gait and not a hop. */</i>
+<b>const</b> SIDE_PHASE = { L: 0, R: Math.PI } <b>as const</b>;
+
+<i>// inside gaitTargets, for every joint:</i>
+<b>let</b> angle = g.centre + g.amplitude * Math.sin(cyclePhase + <b>g.phase</b> + <b>SIDE_PHASE[joint.side]</b>);</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>There are two phase offsets added together, and they do different jobs:</p>
+  <ul style="max-width:74ch;padding-left:22px;line-height:1.7">
+    <li><code>g.phase</code> — <strong>evolved</strong>, one per joint kind. Sets the hip-to-knee-to-ankle
+    timing <em>within</em> a leg. This is what the search is discovering.</li>
+    <li><code>SIDE_PHASE[side]</code> — <strong>a constant</strong>, <code>0</code> for the left leg
+    and <code>π</code> for the right. Puts the two legs exactly half a cycle apart, so that one is
+    planted while the other swings.</li>
+  </ul>
+  <p>Because the second is a constant rather than a gene, the two legs can never do anything
+  different from each other. That is why the robot cannot limp, cannot favour an injured side, and
+  cannot turn — and it is why the task suite has six tasks rather than the eight the design
+  originally called for.</p>
+</div>
+
+<h4 style="font-size:18px;margin-top:30px;color:var(--ink-2)">The actual ranges, and why they differ</h4>
+
+<pre class="code"><b>export const</b> GAIT_RANGES = {
+  frequency:   [0.5, 3.0],                 <i>// cycles per second</i>
+  balanceGain: [-2, 2],
+  hip:   { amplitude: [0, 0.8], phase: [0, 2 * Math.PI], centre: [-0.5,  0.5] },
+  knee:  { amplitude: [0, 0.9], phase: [0, 2 * Math.PI], centre: [-0.8,  0.1] },
+  ankle: { amplitude: [0, 0.5], phase: [0, 2 * Math.PI], centre: [-0.4,  0.4] },
+} <b>as const</b>;</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>All three phases share the full <code>[0, 2π]</code> range, because "any moment in the cycle"
+  is meaningful for every joint. The other two are shaped by anatomy:</p>
+  <ul style="max-width:74ch;padding-left:22px;line-height:1.7">
+    <li>The <strong>knee's centre runs <code>[-0.8, 0.1]</code></strong> — almost entirely negative.
+    A knee bends one way. Allowing it to sit bent <em>forwards</em> would be describing a robot
+    that cannot exist.</li>
+    <li>The <strong>ankle's amplitude is capped at 0.5</strong>, lower than the hip and knee. An
+    ankle has the least range of the three and pushing it hard mostly wastes effort.</li>
+    <li>The <strong>hip's centre is symmetric</strong>, <code>[-0.5, 0.5]</code>. A thigh swings
+    equally well forwards and backwards.</li>
+  </ul>
+  <p>These are the <em>gene</em> ranges — what evolution may propose. Separately, the body itself
+  has hard <strong>joint limits</strong> which the physics enforces, and which
+  <code>gaitTargets</code> clamps every target against before handing it to a motor:</p>
+</div>
+
+<pre class="code">limits: {
+  hip:   [-50 * DEG,   90 * DEG],          <i>// −50° behind, 90° in front</i>
+  knee:  [-132 * DEG,   8 * DEG],          <i>// bends a long way one way, barely the other</i>
+  ankle: [-35 * DEG,   25 * DEG],
+}</pre>
+
+<div class="rule-card">
+  <span class="lbl">Two different kinds of limit</span>
+  <strong>Gene ranges</strong> say what evolution is allowed to ask for. <strong>Joint limits</strong>
+  say what the body can physically do. They are separate on purpose: the body is editable in the
+  interface, so a shorter robot with tighter joints must still be drivable by the same eleven-gene
+  genome. <code>gaitTargets</code> reconciles them with a <code>clamp</code> on the last line, so a
+  gait evolved for one body never asks a different body to bend somewhere it cannot.
+</div>
+
+<h4 style="font-size:18px;margin-top:30px;color:var(--ink-2)">A worked example</h4>
+
+<div class="stack" style="max-width:76ch">
+  <p>Here is the starting gait the app opens with — deliberately upright and rhythmic, and
+  deliberately not able to walk:</p>
+</div>
+
+<pre class="code"><b>export function</b> defaultGait(): GaitParams {
+  <b>return</b> {
+    frequency:   1.4,                                       <i>// 1.4 strides per second</i>
+    balanceGain: 0.5,
+    hip:   { amplitude: 0.4, phase: 0,   centre:  0.1  },
+    knee:  { amplitude: 0.5, phase: 2.2, centre: -0.35 },
+    ankle: { amplitude: 0.2, phase: 3.6, centre:  0    },
+  };
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Read as English: <em>a stride takes about 0.7 seconds. The thigh swings 23° either side of a
+  point slightly forward of vertical, starting at the top of the cycle. The knee swings 29° either
+  side of a 20°-bent posture, but does so 2.2 radians — about 35% of a cycle — later than the hip.
+  The ankle makes a small 11° motion, later again.</em></p>
+  <p>The hip phase is <code>0</code>, and that is not a coincidence: with only relative timing
+  mattering, one joint can always be treated as the reference and the others described against it.
+  Evolution does not know that and will happily discover a hip phase of 4.1 with everything else
+  shifted to match — producing an identical robot from a completely different-looking genome. This
+  is another reason two genomes can look nothing alike and behave the same way.</p>
+</div>
+
+<div class="rule-card">
+  <span class="lbl">If you take one thing from this section</span>
+  <strong>Amplitude and centre describe a shape. Phase describes timing.</strong> Getting a robot
+  to stand is a matter of centres; getting it to move is a matter of amplitudes; getting it to
+  <em>walk</em> is almost entirely a matter of phases. That is also the order of difficulty, and
+  it is why the fitness curve tends to climb in three distinct steps.
+</div>
+
+
+<h3 style="font-size:22px;margin-top:34px"><code>operators.ts</code> — the genetic machinery</h3>
   <div class="stack" style="max-width:76ch">
     <p>Four small functions, each a standard technique with a fixed, named constant:</p>
   </div>
@@ -1034,7 +1325,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
         </marker>
       </defs>
     </svg>
-    <figcaption><b>Fig 4</b> The dashed box is the part that matters for correctness. Breeding
+    <figcaption><b>Fig 6</b> The dashed box is the part that matters for correctness. Breeding
     happens <strong>one pair at a time</strong> — select, cross, mutate, then the next pair —
     never "all the selections, then all the crossovers". Both orders produce valid children, but
     they consume random numbers in a different sequence and therefore produce entirely different
@@ -1222,7 +1513,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
         </marker>
       </defs>
     </svg>
-    <figcaption><b>Fig 5</b> Neither axis is scored. Nothing in the search tries to fill the grid,
+    <figcaption><b>Fig 7</b> Neither axis is scored. Nothing in the search tries to fill the grid,
     which is exactly what makes its coverage an honest measure of what the search explored rather
     than a second target it was aiming at.</figcaption>
   </figure>
@@ -1380,7 +1671,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
       <line x1="110" y1="230" x2="820" y2="230" stroke="var(--rule-2)"/>
       <text class="xs" x="120" y="222">read a snapshot · test each foot for ground contact · accumulate effort · check for a fall</text>
     </svg>
-    <figcaption><b>Fig 6</b> Three different rates inside one loop. The control rate is a quarter
+    <figcaption><b>Fig 8</b> Three different rates inside one loop. The control rate is a quarter
     of the physics rate because a real controller does not get to act on every microsecond, and
     because doing it four times less often is four times cheaper in the hottest loop in the
     program.</figcaption>
@@ -1476,7 +1767,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
         </marker>
       </defs>
     </svg>
-    <figcaption><b>Fig 7</b> <code>main.ts</code> is deliberately the only place that knows about
+    <figcaption><b>Fig 9</b> <code>main.ts</code> is deliberately the only place that knows about
     everything. Each folder below it is independently understandable, and most of them are
     independently testable.</figcaption>
   </figure>
@@ -1555,7 +1846,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
         </marker>
       </defs>
     </svg>
-    <figcaption><b>Fig 8</b> Four islands, plus a fifth worker used only for the task suite. That
+    <figcaption><b>Fig 10</b> Four islands, plus a fifth worker used only for the task suite. That
     fifth one is another <em>instance of the same worker file</em>, not a second file: the physics
     engine's WebAssembly is bundled into each distinct worker entry, so a separate file would have
     added another copy to the download.</figcaption>
@@ -1718,7 +2009,7 @@ pre.code i{color:var(--ink-3);font-style:normal}
         </marker>
       </defs>
     </svg>
-    <figcaption><b>Fig 9</b> The repository interfaces exist for one reason: so endpoint tests need
+    <figcaption><b>Fig 11</b> The repository interfaces exist for one reason: so endpoint tests need
     no database and no disk. Swappability was never the argument — the ORM already provides that
     for the price of a connection string.</figcaption>
   </figure>
@@ -1894,7 +2185,7 @@ runSuite(morph, gait, <b>evaluateGait</b>)</pre>
       <text class="xs" x="428" y="248">"no gait panel re-runs the simulation" · "every</text>
       <text class="xs" x="428" y="264">element help names exists in index.html"</text>
     </svg>
-    <figcaption><b>Fig 10</b> Four kinds, each proving something a different kind cannot. The
+    <figcaption><b>Fig 12</b> Four kinds, each proving something a different kind cannot. The
     structural tests are the unusual ones: they read files as text and assert properties of the
     code itself.</figcaption>
   </figure>
