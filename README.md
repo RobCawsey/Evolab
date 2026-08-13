@@ -125,7 +125,7 @@ packages/sim/         the Rapier wrapper — morphology → world, step, record 
 apps/web/             the Vite app — canvas rendering, Web Workers, panels, help.
 server/               ASP.NET Core Minimal API — saved runs, share links, community archive.
 scripts/              headless entry points for the CLI commands above.
-docs/                 the two documents below.
+docs/                 the three documents below.
 ```
 
 Packages are consumed as source through Vite aliases, so there is no build step for them and

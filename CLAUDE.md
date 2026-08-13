@@ -4,7 +4,7 @@ A browser app for designing bipedal robots, evolving their walking gaits with a 
 algorithm, and learning how both work by watching them happen. Personal project, built in
 slices. Teaching tool first, simulator second.
 
-Two documents, different jobs:
+Three documents, different jobs:
 
 - **[docs/code-design.html](docs/code-design.html)** — how the *code* is organised, for a
   reader who has never seen the project. Layers and dependency direction, the nine core types,
