@@ -576,6 +576,78 @@ pre.code i{color:var(--ink-3);font-style:normal}
     <p>It is the only class in the package, because it is the only thing with genuine state: each
     number it produces changes what the next one will be. Everything else is a plain function.</p>
   </div>
+<h4 style="font-size:17px;margin-top:24px;color:var(--ink-2)">The code</h4>
+<pre class="code"><b>export class</b> Rng {
+  <b>readonly</b> seed: number;
+  <b>private readonly</b> s: Uint32Array;          <i>// four 32-bit words — the entire state</i>
+
+  <b>constructor</b>(seed: number) {
+    <b>this</b>.seed = seed;
+    <b>const</b> mix = splitmix32(seed);           <i>// spread one seed into four words</i>
+    <b>this</b>.s = <b>new</b> Uint32Array([mix(), mix(), mix(), mix()]);
+    <i>// A four-zero state is a fixed point of the generator: it would return zero for ever.</i>
+    <i>// Unreachable from splitmix32 in practice, but cheap to rule out.</i>
+    <b>if</b> (<b>this</b>.s.every((w) =&gt; w === 0)) <b>this</b>.s[0] = 1;
+  }
+
+  <b>u32</b>(): number {                            <i>// one raw 32-bit number</i>
+    <b>const</b> s = <b>this</b>.s;
+    <b>const</b> result = (Math.imul(rotl(Math.imul(s[0 + 1]!, 5), 7), 9) &gt;&gt;&gt; 0);
+    <b>const</b> t = (s[1]! &lt;&lt; 9) &gt;&gt;&gt; 0;
+    <i>// shuffle the four words into each other — this is the whole algorithm</i>
+    s[2] = (s[2]! ^ s[0]!) &gt;&gt;&gt; 0;
+    s[3] = (s[3]! ^ s[1]!) &gt;&gt;&gt; 0;
+    s[1] = (s[1]! ^ s[2]!) &gt;&gt;&gt; 0;
+    s[0] = (s[0]! ^ s[3]!) &gt;&gt;&gt; 0;
+    s[2] = (s[2]! ^ t) &gt;&gt;&gt; 0;
+    s[3] = rotl(s[3]!, 11) &gt;&gt;&gt; 0;
+    <b>return</b> result;
+  }
+
+  <b>float</b>():  number { <b>return this</b>.u32() / 4294967296; }   <i>// [0, 1)</i>
+  <b>range</b>(lo, hi) { <b>return</b> lo + <b>this</b>.float() * (hi - lo); }
+  <b>int</b>(n)       { <b>return</b> Math.floor(<b>this</b>.float() * n); }
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Three things in there are worth pulling out, because each is a general lesson rather than a
+  detail about random numbers.</p>
+
+  <p><strong><code>&gt;&gt;&gt; 0</code> everywhere.</strong> JavaScript has no integer type — every
+  number is a 64-bit float. Bit operations silently convert to a <em>signed</em> 32-bit integer,
+  so a result with the top bit set comes back negative. The unsigned right-shift by zero forces
+  it back to unsigned. Miss one and the generator still produces numbers, still looks random, and
+  no longer matches any other implementation of xoshiro128** on earth.</p>
+
+  <p><strong><code>Math.imul</code> rather than <code>*</code>.</strong> Multiplying two large
+  32-bit values as floats loses the low bits to rounding. <code>Math.imul</code> does a true
+  32-bit integer multiply and keeps the bits that matter.</p>
+
+  <p><strong>The zero-state guard.</strong> All four words being zero is a state the generator
+  can never escape from — it would return zero for ever. It is unreachable in practice, and the
+  check is one line. This is a recurring shape in this codebase: when the impossible case is
+  catastrophic and the guard is trivial, write the guard.</p>
+</div>
+
+<div class="rule-card">
+  <span class="lbl">Why a class here, and nowhere else</span>
+  <code>Rng</code> is the only class in the package because it is the only thing with genuine
+  state — each call to <code>u32()</code> changes what the next one returns. Everything else is a
+  plain function that maps inputs to outputs. The project's convention is "no classes unless
+  there is state with a lifecycle", and this is one of exactly two things that qualifies (the
+  other is <code>Sim</code>, which wraps a physics world that must be explicitly freed).
+</div>
+
+<div class="rule-card warn">
+  <span class="lbl">The comment in the real file worth knowing about</span>
+  You might expect <code>constructor(readonly seed: number)</code> — TypeScript's shorthand for
+  "take this parameter and also store it as a field". It is not used, and that is deliberate:
+  that syntax <em>emits code</em> rather than only removing types, and the command-line scripts
+  run TypeScript through Node's <code>--experimental-strip-types</code>, which only erases. The
+  same rule rules out <code>enum</code>, namespaces and decorators across the whole project.
+</div>
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>controller.ts</code> — turning numbers into movement</h3>
   <div class="stack" style="max-width:76ch">
@@ -610,6 +682,108 @@ pre.code i{color:var(--ink-3);font-style:normal}
     obstacle, or where it is going. Understanding that one fact explains most of the project's
     later findings.</p>
   </div>
+<h4 style="font-size:17px;margin-top:24px;color:var(--ink-2)">The whole controller, in fourteen lines</h4>
+
+<pre class="code"><b>export function</b> gaitTargets(
+  morph: Morphology,
+  params: GaitParams,
+  t: number,                                <i>// simulated seconds since the trial began</i>
+  state: ControlState = STILL,              <i>// { pitch, pitchRate } — all it can sense</i>
+  out?: Map&lt;string, number&gt;,                <i>// written into, to avoid allocating</i>
+): Map&lt;string, number&gt; {
+  <b>const</b> targets = out ?? <b>new</b> Map&lt;string, number&gt;();
+  targets.clear();
+
+  <b>const</b> cyclePhase = 2 * Math.PI * params.frequency * t;
+
+  <i>// One number, shared by both hips: how far forward the torso is predicted to be, times</i>
+  <i>// the gain. Driving the thighs forward against a forward lean pushes the torso back</i>
+  <i>// upright by reaction — the hip balance strategy, in one line.</i>
+  <b>const</b> correction = params.balanceGain * (state.pitch + PITCH_LEAD * state.pitchRate);
+
+  <b>for</b> (<b>const</b> joint <b>of</b> morph.joints) {
+    <b>const</b> g = params[joint.kind];             <i>// the hip / knee / ankle triple</i>
+    <b>let</b> angle = g.centre + g.amplitude * Math.sin(cyclePhase + g.phase + SIDE_PHASE[joint.side]);
+    <b>if</b> (joint.kind === 'hip') angle += correction;
+    targets.set(joint.id, clamp(angle, joint.limits[0], joint.limits[1]));
+  }
+
+  <b>return</b> targets;
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>That is the entire brain of the robot. Everything it will ever do is in that
+  <code>Math.sin</code>.</p>
+
+  <p><strong>Read the angle line first.</strong> <code>centre + amplitude × sin(…)</code> is a
+  joint swinging back and forth: <code>centre</code> is the middle of the swing,
+  <code>amplitude</code> is how far either side it goes, and the argument to <code>sin</code>
+  decides where in the swing it is right now. That argument has three parts added together:</p>
+
+  <ul style="max-width:74ch;padding-left:22px;line-height:1.65">
+    <li><code>cyclePhase</code> — the clock. It advances steadily with time, at a rate set by the
+    evolved <code>frequency</code> gene.</li>
+    <li><code>g.phase</code> — an evolved offset per joint kind. This is what lets the knee lag
+    behind the hip, which is the difference between walking and flailing.</li>
+    <li><code>SIDE_PHASE[joint.side]</code> — a constant, <code>0</code> for the left leg and
+    <code>π</code> for the right. Half a cycle apart. Not evolved.</li>
+  </ul>
+
+  <p>That last one is the single most consequential line in the project. <strong>The two legs are
+  driven by the same three numbers, offset by exactly half a cycle.</strong> That is why the robot
+  cannot limp, cannot favour one leg, and — because there is no gene that could ever make one leg
+  step differently from the other — cannot turn. When the task suite later needed a slalom course
+  and could not have one, this constant is the reason.</p>
+</div>
+
+<div class="rule-card">
+  <span class="lbl">The one closed loop</span>
+  Everything above is <em>open-loop</em>: it is a function of the clock and nothing else. The
+  robot would do exactly the same thing on a slope, on ice, or in mid-air. The single exception is
+  <code>correction</code>, which reads the torso's pitch and pushes the hips against it.
+  <p style="margin-top:8px">Notice <code>PITCH_LEAD * state.pitchRate</code>. Feeding back the
+  angle alone always lags — by the time the error is big enough to correct, the robot already has
+  the momentum to keep going, so it overshoots and oscillates. Adding a fraction of the
+  <em>rate</em> of change is a first-order prediction of where the torso will be in 0.12 seconds,
+  and damps the response. It is a fixed constant rather than a twelfth gene, deliberately: one
+  tunable number is the whole point of choosing this controller.</p>
+</div>
+
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Genome in, parameters out</h4>
+
+<div class="stack" style="max-width:76ch">
+  <p>A genome is eleven numbers between 0 and 1. They only become meaningful by being stretched
+  into real ranges:</p>
+</div>
+
+<pre class="code"><i>// evolution never sees these ranges. It works entirely in [0, 1].</i>
+<b>const</b> GENE_RANGES = [
+  [0.4, 2.6],      <i>// frequency, Hz</i>
+  [0.0, 3.0],      <i>// balance gain</i>
+  ... nine more, three per joint kind
+];
+
+<b>export function</b> decodeGenome(genome: Genome): GaitParams {
+  <b>return</b> {
+    frequency:   lerp(genome[0]!, 0),
+    balanceGain: lerp(genome[1]!, 1),
+    hip:   { amplitude: lerp(genome[2]!, 2), phase: lerp(genome[3]!, 3), centre: lerp(genome[4]!, 4) },
+    knee:  { amplitude: lerp(genome[5]!, 5), phase: lerp(genome[6]!, 6), centre: lerp(genome[7]!, 7) },
+    ankle: { amplitude: lerp(genome[8]!, 8), phase: lerp(genome[9]!, 9), centre: lerp(genome[10]!, 10) },
+  };
+}</pre>
+
+<div class="rule-card">
+  <span class="lbl">Why unit space matters</span>
+  Because every gene lives in <code>[0, 1]</code>, the crossover and mutation operators never need
+  to know what a gene <em>means</em>. Mutating a frequency and mutating an angle are the same
+  operation on the same scale. That is what keeps <code>operators.ts</code> completely free of any
+  controller knowledge — it is a general-purpose genetic algorithm that happens to be pointed at a
+  robot.
+</div>
+
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>morphology.ts</code> — building a body</h3>
   <div class="stack" style="max-width:76ch">
@@ -646,6 +820,67 @@ pre.code i{color:var(--ink-3);font-style:normal}
     lucky. Always breeding the very best would collapse the population onto one answer within a
     handful of generations, and the search would stop finding anything new.
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Selection: a three-way tournament</h4>
+
+<pre class="code"><b>export function</b> tournament(
+  fitness: <b>readonly</b> number[],
+  size: number,                              <i>// 3</i>
+  rng: Rng,
+  drawn?: number[],                          <i>// optional: record who was drawn, for the stepper</i>
+): number {
+  <b>let</b> best = rng.int(fitness.length);       <i>// pick someone at random</i>
+  drawn?.push(best);
+  <b>for</b> (<b>let</b> i = 1; i &lt; size; i++) {
+    <b>const</b> challenger = rng.int(fitness.length);
+    drawn?.push(challenger);
+    <b>if</b> (fitness[challenger]! &gt; fitness[best]!) best = challenger;
+  }
+  <b>return</b> best;                              <i>// an index, not an individual</i>
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Eight lines, and it is the entire mechanism by which the population improves. Pick three at
+  random, keep the best. Do it twice to get two parents.</p>
+  <p>The <code>drawn</code> parameter is worth noticing. It is <code>undefined</code> during a
+  normal run, so the function allocates nothing and records nothing. The teaching stepper passes
+  an array and gets back exactly which three individuals were drawn, so it can show the tournament
+  happening. <strong>Instrumentation that costs nothing when it is off</strong> appears three
+  times in this codebase — here, in crossover's <code>blended</code>, and in mutation's
+  <code>record</code>.</p>
+</div>
+
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Crossover: blending two parents</h4>
+
+<pre class="code"><b>for</b> (<b>let</b> i = 0; i &lt; n; i++) {
+  <b>const</b> a = p1[i]!, b = p2[i]!;
+
+  <b>if</b> (rng.float() &gt; probability) {          <i>// 10% of genes are copied, not blended</i>
+    c1[i] = a; c2[i] = b;
+    <b>continue</b>;
+  }
+
+  <b>const</b> u = rng.float();
+  <b>const</b> beta = u &lt;= 0.5
+    ? Math.pow(2 * u, 1 / (eta + 1))
+    : Math.pow(1 / (2 * (1 - u)), 1 / (eta + 1));
+
+  c1[i] = clamp01(0.5 * ((1 + beta) * a + (1 - beta) * b));
+  c2[i] = clamp01(0.5 * ((1 - beta) * a + (1 + beta) * b));
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>This is <em>simulated binary crossover</em>. Ignore the exponent for a moment and look at the
+  last two lines: they are a weighted average of the two parents, with the weights decided by
+  <code>beta</code>. When <code>beta</code> is 1 the children are exact copies of the parents; when
+  it is near 0 both children land halfway between them; when it exceeds 1 the children land
+  <em>outside</em> the parents, further apart than they were.</p>
+  <p>The <code>eta</code> constant — 15 here — controls how often that last case happens. Higher
+  values keep children close to their parents; lower values scatter them. It is the knob between
+  refining what you have and looking somewhere new.</p>
+</div>
+
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>island.ts</code> — one generation</h3>
   <div class="stack" style="max-width:76ch">
@@ -655,6 +890,95 @@ pre.code i{color:var(--ink-3);font-style:normal}
     <p>One generation goes: score everyone, sort, keep the best two unchanged, then repeatedly
     pick two parents and breed them until the population is full again.</p>
   </div>
+<h4 style="font-size:17px;margin-top:24px;color:var(--ink-2)">Scoring only what needs scoring</h4>
+
+<pre class="code"><b>export function</b> evaluatePending(island: Island, evaluate: Evaluator): number {
+  <b>const</b> cfg = island.config;
+  <b>let</b> evaluations = 0;
+  <b>for</b> (<b>const</b> ind <b>of</b> island.population) {
+    <b>if</b> (ind.result !== <b>null</b>) <b>continue</b>;      <i>// an elite — already scored, do not re-run</i>
+    <b>const</b> result = evaluate(ind.genes, cfg.trialSeed);
+    ind.result  = result;
+    ind.fitness = score(result, cfg.trialSeconds, cfg.objective).total;
+    evaluations++;
+  }
+  <b>return</b> evaluations;
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Two details carry a lot of weight here.</p>
+  <p><strong><code>if (ind.result !== null) continue</code></strong> — an individual carrying a
+  result has already been through a trial. The two elites copied forward from the last generation
+  are in exactly that state, so they are not re-run. In a population of 24 with 2 elites that is
+  22 trials per generation rather than 24, which is roughly an 8% saving on the most expensive
+  operation in the program.</p>
+  <p><strong><code>cfg.trialSeed</code>, not a per-generation seed.</strong> Every trial in the
+  whole run uses the same seed, which decides the small random tilt the robot starts with.</p>
+</div>
+
+<div class="rule-card warn">
+  <span class="lbl">A bug this project actually shipped</span>
+  The seed originally varied by generation, which sounds more rigorous — test each generation
+  against fresh conditions. But elites are <em>not re-evaluated</em>, so an elite that got a
+  favourable tilt in generation 5 carried that lucky score forward for ever while everyone around
+  it was judged on harder draws. The reported champion was part luck and the best-fitness curve
+  was not honestly monotonic.
+  <p style="margin-top:8px">The general rule, which is worth carrying anywhere: <strong>if a score
+  survives across generations, the conditions it was scored under must not change.</strong> The
+  cost is that a champion is tuned to one perturbation — which is precisely why the task suite
+  later re-tests every gait across five unseen seeds and reports the median.</p>
+</div>
+
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Breeding, one pair at a time</h4>
+
+<pre class="code"><i>// Elitism. Not optional: without it the best gait can be lost to an unlucky draw and</i>
+<i>// the fitness curve develops dips that look exactly like a bug in the operators.</i>
+<b>for</b> (<b>let</b> i = 0; i &lt; cfg.elites &amp;&amp; i &lt; ranked.length; i++) {
+  <b>const</b> e = ranked[i]!;
+  next.push({ genes: Float32Array.from(e.genes), fitness: e.fitness, result: e.result });
+}
+
+<b>let</b> pair = 0;
+<b>while</b> (next.length &lt; cfg.size) {
+  <b>const</b> ia = tournament(fitnesses, cfg.tournamentSize, rng);      <i>// ─┐</i>
+  <b>const</b> ib = tournament(fitnesses, cfg.tournamentSize, rng);      <i>//  │ select</i>
+  <b>const</b> a = island.population[ia]!, b = island.population[ib]!;   <i>// ─┘</i>
+
+  <b>const</b> [c1, c2] = sbx(a.genes, b.genes, rng, SBX_ETA, cfg.crossoverProbability);  <i>// cross</i>
+
+  <b>for</b> (<b>const</b> child <b>of</b> [c1, c2]) {
+    <i>// The population can fill on the first child, in which case the second is discarded</i>
+    <i>// *before* being mutated and consumes no randomness. Preserving that is part of</i>
+    <i>// preserving the draw order.</i>
+    <b>if</b> (next.length &gt;= cfg.size) <b>break</b>;
+    mutate(child, rng, mutationRate, MUTATION_ETA);                 <i>// mutate</i>
+    next.push({ genes: child, fitness: 0, result: <b>null</b> });
+  }
+  pair++;
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Notice that <em>select → cross → mutate</em> happens completely for one pair before the next
+  pair begins. It would be tidier to gather all the selections, then do all the crossovers, then
+  all the mutations. It would also be a different program.</p>
+  <p>The reason is the shared <code>rng</code>. Every call to <code>tournament</code>,
+  <code>sbx</code> and <code>mutate</code> pulls numbers from the same sequence, in order.
+  Reordering the calls reorders the draws, so every genome downstream is different. Both versions
+  are valid genetic algorithms; they are simply not the <em>same</em> genetic algorithm.</p>
+  <p>The <code>break</code> in the middle is subtler still. With an odd number of slots left, the
+  second child is thrown away — and it is thrown away <em>before</em> <code>mutate</code> is
+  called, so it never consumes any random numbers. Move that <code>break</code> below the mutation
+  and every subsequent draw shifts.</p>
+</div>
+
+<div class="rule-card warn">
+  <span class="lbl">How you find out you broke it</span>
+  <code>npm run evolve</code> stops printing <code>6.4598</code>. That is the entire safety net for
+  this function, and it is why the number is pinned in a test rather than left as a note.
+</div>
+
+
+
 
   <figure class="dg">
     <svg viewBox="0 0 880 380" role="img" aria-label="One generation, step by step">
@@ -745,6 +1069,50 @@ pre.code i{color:var(--ink-3);font-style:normal}
     produce identical results, because the moment that stops being true the teaching screen
     becomes a lie.</p>
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">One generation, two speeds</h4>
+
+<pre class="code"><b>export function*</b> generation(
+  island: Island,
+  evaluate: Evaluator,
+  opts: GenerationOptions = {},
+): Generator&lt;Stage, GenerationSummary&gt; {
+  <b>const</b> trace = opts.trace ?? <b>false</b>;
+
+  <b>if</b> (trace) <b>yield</b> { stage: 'population', generation: island.generation, ... };
+
+  <b>const</b> evaluations = evaluatePending(island, evaluate);
+  <b>const</b> { ranked, fitnesses, summary } = rankPopulation(island, evaluations);
+
+  <b>if</b> (trace) <b>yield</b> { stage: 'evaluate', evaluations, fitnesses, ranked: order };
+
+  <b>yield</b>* breed(island, ranked, fitnesses, trace);   <i>// yields select/crossover/mutate per pair</i>
+
+  <b>if</b> (trace) <b>yield</b> { stage: 'replace', summary };
+  <b>return</b> summary;
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>The <code>function*</code> and <code>yield</code> keywords make this a <strong>generator</strong>:
+  a function that can pause, hand a value back to whoever called it, and resume where it left off.</p>
+  <p>The search drains it as fast as it can and ignores every pause. The teaching stepper advances
+  it one pause at a time and draws whatever it finds. Same function, same random draws, same
+  result — one code path at two speeds.</p>
+  <p>Every <code>yield</code> is behind <code>if (trace)</code>, so a normal run allocates none of
+  those objects. And the <code>yield*</code> in the middle delegates to <code>breed</code>, which
+  is itself a generator, so the pairs stream through without <code>generation</code> knowing how
+  many there will be.</p>
+</div>
+
+<div class="rule-card">
+  <span class="lbl">Why this is the design that makes the teaching honest</span>
+  The alternative is a second, simplified implementation written for the screen. That version
+  would be easier to write and would drift from the real one within a month. Instead there is one
+  implementation, and a test asserts that a traced run and an untraced run produce identical
+  results — so the screen cannot show something the algorithm does not do.
+</div>
+
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>fitness.ts</code> — what "good" means</h3>
   <div class="stack" style="max-width:76ch">
@@ -756,6 +1124,47 @@ pre.code i{color:var(--ink-3);font-style:normal}
     description of an outcome, not a piece of physics, and the core is not allowed to import the
     simulator anyway.</p>
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Scoring a trial</h4>
+
+<pre class="code"><b>export function</b> score(
+  result: TrialResult,
+  requestedDuration: number,
+  objective: Objective = DEFAULT_OBJECTIVE,
+): FitnessBreakdown {
+  <b>const</b> distance = objective.distance * result.distance;
+  <b>const</b> upright  = objective.upright  * (result.uprightTime / requestedDuration);
+
+  <i>// Computed via the excess so an unpenalised trial reports +0 rather than -0. Negative</i>
+  <i>// zero is harmless arithmetically and confusing in a printed breakdown.</i>
+  <b>const</b> excess = Math.max(0, result.effort / objective.effortBudget - 1);
+  <b>const</b> effort = excess === 0 ? 0 : -objective.effort * excess;
+
+  <i>// Clamped at zero: negative fitness makes tournament selection compare noise, and a</i>
+  <i>// genome that walks backwards is not more interesting than one that stands still.</i>
+  <b>const</b> total = Math.max(0, distance + upright + effort);
+  <b>return</b> { total, distance, upright, effort };
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>Three terms, each returned separately as well as summed. Returning the breakdown rather than
+  just the total is what lets the interface show <em>why</em> a robot scored what it did, and it
+  costs nothing.</p>
+  <p>Effort is only penalised <em>above a budget</em>. Below it, moving costs nothing. That shape
+  matters: a penalty that applies from zero would make standing perfectly still the cheapest
+  option, and the search would find that immediately.</p>
+</div>
+
+<div class="rule-card warn">
+  <span class="lbl">The clamp at zero, and what it costs</span>
+  Negative fitnesses would make tournaments compare meaningless magnitudes, so everything below
+  zero becomes zero. The cost is that in generation zero, where nearly every robot falls over
+  instantly, a great many individuals have exactly the same fitness of 0 — and a tournament
+  between three of them is a coin toss. That is not a bug; it is what "no selection pressure yet"
+  looks like, and watching the first few generations move slowly for that reason is one of the
+  things the teaching stepper is for.
+</div>
+
+
 
   <div class="rule-card">
     <span class="lbl">An honest naming decision worth copying</span>
@@ -824,6 +1233,52 @@ pre.code i{color:var(--ink-3);font-style:normal}
     bit-identical. Remove the archive entirely and the search is unchanged. That is what makes it
     an observation rather than a second algorithm.
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">The archive's one rule</h4>
+
+<pre class="code"><b>export function</b> archiveInsert(archive, genome, behaviour, fitness, generation = 0): boolean {
+  <b>return</b> archivePlace(archive, archiveIndex(archive, behaviour), genome, behaviour, fitness, generation);
+}
+
+<b>export function</b> archivePlace(archive, index, genome, behaviour, fitness, generation = 0): boolean {
+  archive.attempts++;
+  <b>if</b> (index &lt; 0 || index &gt;= archive.cells.length) <b>return false</b>;
+
+  <b>const</b> incumbent = archive.cells[index] ?? <b>null</b>;
+  <b>if</b> (incumbent !== <b>null</b> &amp;&amp; incumbent.fitness &gt;= fitness) <b>return false</b>;   <i>// ties lose</i>
+
+  <i>// Copied. The population mutates its genomes in place between generations, and an archive</i>
+  <i>// holding a live reference would silently rewrite its own history.</i>
+  archive.cells[index] = {
+    genes: Float32Array.from(genome),
+    fitness,
+    behaviour: [behaviour[0], behaviour[1]],
+    generation,
+  };
+  <b>if</b> (incumbent === <b>null</b>) archive.filled++;
+  archive.improvements++;
+  <b>return true</b>;
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p><code>Float32Array.from(genome)</code> is not defensive style — it is load-bearing. The
+  population reuses and mutates its genome arrays in place between generations. An archive holding
+  a reference rather than a copy would find its stored history quietly rewritten underneath it, and
+  cells would report genomes that no longer match their fitness.</p>
+  <p><code>>=</code> rather than <code>></code> means <strong>ties lose</strong>: an equal score
+  does not displace the incumbent. That makes the map stable to look at — a cell that stops
+  changing has genuinely converged rather than churning between equivalent genomes every
+  generation. It is also, unexpectedly, what makes re-publishing a run to the shared community map
+  a no-op, because a run's own cells tie with themselves.</p>
+  <p>The split between the two functions exists because of one measured bug. <code>archiveInsert</code>
+  derives the grid cell from the behaviour. That is right for a live search, and wrong for a cell
+  read back from storage, where the stride and duty have been rounded to four decimals for the
+  wire. A stride of 0.87499 stored as 0.8750 sits exactly on a bin boundary and re-derives one
+  column to the right — 244 cells were sent and 243 appeared. So the index is authoritative once it
+  exists, and both functions still share the one tie rule.</p>
+</div>
+
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>terrain.ts</code> and <code>tasks.ts</code> — testing a gait</h3>
   <div class="stack" style="max-width:76ch">
@@ -1159,6 +1614,53 @@ pre.code i{color:var(--ink-3);font-style:normal}
     <p>Every request carries a five-second timeout, because a request that hangs produces neither
     an error to report nor a result to use, which is the only outcome worse than failing.</p>
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Failure as a value</h4>
+
+<pre class="code"><b>async function</b> request&lt;T&gt;(path: string, opts: RequestOptions = {}): Promise&lt;ApiResult&lt;T&gt;&gt; {
+  <b>const</b> controller = <b>new</b> AbortController();
+  <b>const</b> timer = setTimeout(() =&gt; controller.abort(), TIMEOUT_MS);   <i>// five seconds</i>
+
+  <b>try</b> {
+    <b>const</b> response = <b>await</b> fetch(BASE + path, { ..., signal: controller.signal });
+
+    <i>// Read as text first. A proxy returning HTML with a 200 is a real thing, and `.json()`</i>
+    <i>// on it throws in a way that would otherwise look like a network failure.</i>
+    <b>const</b> raw = <b>await</b> response.text();
+    <b>let</b> parsed: unknown = <b>null</b>;
+    <b>if</b> (raw.length &gt; 0) {
+      <b>try</b> { parsed = JSON.parse(raw); }
+      <b>catch</b> {
+        <b>return</b> response.ok
+          ? { ok: <b>false</b>, error: clientError(CLIENT_CODES.malformed, 'The server sent something this app could not read.') }
+          : { ok: <b>false</b>, error: normaliseError(response.status, <b>null</b>) };
+      }
+    }
+
+    <b>if</b> (!response.ok) <b>return</b> { ok: <b>false</b>, error: normaliseError(response.status, parsed) };
+    <b>return</b> { ok: <b>true</b>, data: parsed <b>as</b> T };
+
+  } <b>catch</b> (err) {
+    <b>const</b> aborted = err <b>instanceof</b> DOMException &amp;&amp; err.name === 'AbortError';
+    <b>return</b> { ok: <b>false</b>, error: aborted ? clientError('timeout', ...) : clientError('offline', ...) };
+  } <b>finally</b> {
+    clearTimeout(timer);
+  }
+}</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>That <code>catch</code> is the only one in the entire browser application. Every outcome —
+  including the two nobody writes tests for, a proxy returning an HTML error page and a 200 whose
+  body will not parse — comes back as a value describing what happened.</p>
+  <p>Reading the body as <em>text</em> first is the detail that makes the malformed cases
+  distinguishable. Calling <code>.json()</code> directly would throw, and the throw would be caught
+  by the outer handler and reported as a network failure, which is a different and misleading
+  thing to tell someone.</p>
+  <p>The five-second timeout exists because a request that hangs produces neither an error to
+  report nor a result to use. Nothing resolves, the "never blocks" guarantee quietly stops holding,
+  and there is no symptom to notice.</p>
+</div>
+
+
 
   <h3 style="font-size:22px;margin-top:34px"><code>challenges/</code> and <code>ui/help/</code> — teaching, as data</h3>
   <div class="stack" style="max-width:76ch">
@@ -1259,6 +1761,55 @@ runSuite(morph, gait, <b>evaluateGait</b>)</pre>
     there is exactly one implementation and it cannot drift into two. And the dependency arrow
     stays pointing the right way.</p>
   </div>
+<h4 style="font-size:17px;margin-top:30px;color:var(--ink-2)">Injecting the evaluator, in full</h4>
+
+<pre class="code"><i>// packages/evolution/src/tasks.ts — the core, which may not import the simulator</i>
+
+<b>export type</b> TaskEvaluator = (
+  morph: Morphology,
+  gait: GaitParams,
+  opts: { seed: number; seconds: number; terrain?: TerrainSpec; impulses?: ... },
+) =&gt; TrialResult;
+
+<b>export function</b> runSuite(
+  morph: Morphology,
+  gait: GaitParams,
+  <b>evaluate: TaskEvaluator</b>,                  <i>// ← passed in, never imported</i>
+  tasks = TASKS,
+  seeds = TASK_SEEDS,
+): Map&lt;string, TrialResult[]&gt; {
+  <b>const</b> byTask = <b>new</b> Map&lt;string, TrialResult[]&gt;();
+  <b>for</b> (<b>const</b> task <b>of</b> tasks) {
+    <b>const</b> body = taskMorphology(morph, task);   <i>// Payload makes the torso heavier</i>
+    byTask.set(task.key, seeds.map((seed) =&gt; evaluate(body, gait, {
+      seed,
+      seconds: task.seconds,
+      ...(task.terrain  ? { terrain:  task.terrain  } : {}),
+      ...(task.impulses ? { impulses: task.impulses } : {}),
+    })));
+  }
+  <b>return</b> byTask;
+}</pre>
+
+<pre class="code"><i>// and the two callers, in two completely different environments</i>
+
+<i>// scripts/tasks.ts — a command-line tool, running under Node</i>
+<b>const</b> byTask = runSuite(morph, gait, <b>evaluateGait</b>);
+
+<i>// apps/web/src/workers/island.worker.ts — a Web Worker in a browser</i>
+<b>const</b> byTask = runSuite(message.morphology, message.gait, <b>evaluateGait</b>);</pre>
+
+<div class="stack" style="max-width:76ch">
+  <p>This is the pattern that makes the whole dependency direction work, shown end to end. The core
+  describes <em>what</em> to run — six tasks, five seeds, this terrain, that impulse — and knows
+  nothing about how a trial is performed. The caller supplies the doing.</p>
+  <p>The payoff is not theoretical. The command line and the browser run the suite through the same
+  function, so the scorecard printed by <code>npm run tasks</code> and the one drawn in the panel
+  cannot disagree. Before this existed they were two copies of the same loop.</p>
+</div>
+
+
+
 
   <h3 style="font-size:21px;margin-top:32px">2 — Configuration is data, not code</h3>
   <div class="stack" style="max-width:76ch">
