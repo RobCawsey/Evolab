@@ -1,0 +1,1445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Evolab — Code Design</title>
+<style>
+:root{
+  --paper:#F1F0F3; --paper-2:#E8E6EC; --surface:#FBFAFC;
+  --ink:#1A1823; --ink-2:#4A4757; --ink-3:#7C7889;
+  --rule:#D4D1DC; --rule-2:#C2BECD;
+  --accent:#C77E12; --accent-fill:#E9A13B; --accent-soft:#F6E3C4;
+  --cyan:#2E7E99; --violet:#6B5CC4; --ok:#2C7D60; --bad:#AD3F3A;
+  --shadow:0 1px 2px rgba(26,24,35,.06),0 8px 28px -12px rgba(26,24,35,.22);
+  --display:"Bahnschrift","DIN Alternate","Avenir Next Condensed","Roboto Condensed","Segoe UI",system-ui,sans-serif;
+  --body:"Sitka Text",Charter,"Bitstream Charter",Cambria,Georgia,serif;
+  --mono:"Cascadia Mono","SF Mono","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#14131C; --paper-2:#1B1A25; --surface:#191822;
+    --ink:#EDECF2; --ink-2:#B2AEBF; --ink-3:#807C93;
+    --rule:#2B2937; --rule-2:#3A3849;
+    --accent:#E9A13B; --accent-fill:#E9A13B; --accent-soft:#3A2E1B;
+    --cyan:#5FB4D0; --violet:#9585E6; --ok:#4FB48C; --bad:#D9625C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 32px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#14131C; --paper-2:#1B1A25; --surface:#191822;
+  --ink:#EDECF2; --ink-2:#B2AEBF; --ink-3:#807C93;
+  --rule:#2B2937; --rule-2:#3A3849;
+  --accent:#E9A13B; --accent-fill:#E9A13B; --accent-soft:#3A2E1B;
+  --cyan:#5FB4D0; --violet:#9585E6; --ok:#4FB48C; --bad:#D9625C;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 32px -14px rgba(0,0,0,.7);
+}
+:root[data-theme="light"]{
+  --paper:#F1F0F3; --paper-2:#E8E6EC; --surface:#FBFAFC;
+  --ink:#1A1823; --ink-2:#4A4757; --ink-3:#7C7889;
+  --rule:#D4D1DC; --rule-2:#C2BECD;
+  --accent:#C77E12; --accent-fill:#E9A13B; --accent-soft:#F6E3C4;
+  --cyan:#2E7E99; --violet:#6B5CC4; --ok:#2C7D60; --bad:#AD3F3A;
+  --shadow:0 1px 2px rgba(26,24,35,.06),0 8px 28px -12px rgba(26,24,35,.22);
+}
+/* app mockups keep a fixed dark instrument skin in both page themes */
+.app{
+  --a-bg:#0E0D15; --a-pnl:#16151F; --a-pnl2:#1F1E2A; --a-line:#2C2A3A;
+  --a-tx:#E4E2EC; --a-dim:#8C8899; --a-faint:#5C5871;
+  --a-am:#E9A13B; --a-cy:#4EA8C4; --a-vi:#8B7BD8; --a-ok:#4FB48C; --a-bad:#D9625C;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);
+  font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+img,svg,canvas{max-width:100%}
+a{color:var(--accent);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent-fill);outline-offset:3px;border-radius:2px}
+h1,h2,h3,h4{font-family:var(--display);font-weight:600;text-wrap:balance;margin:0;line-height:1.14;
+  letter-spacing:.005em}
+p{margin:0}
+code,kbd{font-family:var(--mono);font-size:.86em;background:var(--paper-2);
+  padding:.1em .34em;border-radius:3px;border:1px solid var(--rule)}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:500}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1500px;margin:0 auto;padding:0 clamp(16px,4vw,44px)}
+.layout{display:grid;grid-template-columns:180px minmax(0,1fr);gap:clamp(24px,4vw,64px);
+  align-items:start}
+@media (max-width:1080px){.layout{grid-template-columns:1fr}}
+
+.rail{position:sticky;top:0;padding:40px 0;max-height:100vh;overflow-y:auto}
+@media (max-width:1080px){.rail{display:none}}
+.rail ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.rail a{display:flex;gap:9px;padding:5px 8px 5px 10px;text-decoration:none;color:var(--ink-3);
+  font-family:var(--display);font-size:14.5px;border-left:2px solid var(--rule);
+  transition:color .15s,border-color .15s}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink);border-left-color:var(--accent-fill);font-weight:600}
+.rail .num{font-family:var(--mono);font-size:10.5px;padding-top:3px;opacity:.65;
+  font-variant-numeric:tabular-nums}
+
+.doc{padding:40px 0 120px;min-width:0}
+section{padding-top:14px;margin-top:52px;border-top:1px solid var(--rule)}
+section:first-of-type{border-top:0;margin-top:0}
+.col{max-width:68ch}
+.stack{display:flex;flex-direction:column;gap:18px}
+.stack-s{display:flex;flex-direction:column;gap:10px}
+h2{font-size:clamp(27px,3.4vw,36px);margin-bottom:4px}
+h3{font-size:20px;color:var(--ink);margin-top:8px}
+h4{font-size:15.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+.lede{font-size:19.5px;color:var(--ink-2);line-height:1.55}
+.sechead{display:flex;flex-direction:column;gap:6px;margin-bottom:22px}
+
+/* ---------- masthead ---------- */
+.mast{padding:56px 0 30px}
+.mast h1{font-size:clamp(44px,8vw,86px);letter-spacing:-.012em;line-height:.95}
+.mast h1 em{font-style:normal;color:var(--accent)}
+.mast .sub{font-size:clamp(18px,2.4vw,23px);color:var(--ink-2);max-width:56ch;margin-top:16px}
+.meta{display:flex;flex-wrap:wrap;gap:0;margin-top:26px;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule)}
+.meta div{flex:1 1 150px;padding:11px 16px 12px 0;display:flex;flex-direction:column;gap:2px}
+.meta dt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3)}
+.meta dd{margin:0;font-family:var(--display);font-size:15px;color:var(--ink)}
+
+.plate{border:1px solid var(--rule);background:var(--surface);border-radius:3px;overflow:hidden;
+  margin-top:30px;box-shadow:var(--shadow)}
+.plate canvas{display:block;width:100%;height:210px}
+.plate .cap{display:flex;justify-content:space-between;gap:14px;padding:8px 14px;
+  border-top:1px solid var(--rule);font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+  letter-spacing:.06em;text-transform:uppercase;flex-wrap:wrap}
+
+/* ---------- components ---------- */
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:900px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:600px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+.card{border:1px solid var(--rule);background:var(--surface);border-radius:3px;padding:16px 18px;
+  display:flex;flex-direction:column;gap:7px}
+.card h4{margin:0;font-size:13px}
+.card p{font-size:15px;color:var(--ink-2);line-height:1.5}
+.card .k{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+
+.pick{border-left:2px solid var(--accent-fill);background:var(--accent-soft);padding:13px 16px;
+  border-radius:0 3px 3px 0;font-size:15.5px}
+.pick strong{font-family:var(--display);letter-spacing:.02em}
+
+/* An amendment is a decision that changed after contact with the build. Deliberately not
+   styled like .pick: the original text stays put and this sits next to it, so the reasoning
+   that was superseded is still readable rather than quietly rewritten. */
+.amend{border:1px solid var(--rule);border-left:2px solid var(--violet);background:var(--surface);
+  padding:13px 16px;border-radius:0 3px 3px 0;font-size:15.5px}
+.amend > .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--violet);display:block;margin-bottom:7px}
+.amend p{margin:0 0 10px}
+.amend p:last-child{margin-bottom:0}
+.amend strong{font-family:var(--display);letter-spacing:.02em;color:var(--ink)}
+
+.tbl{width:100%;overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+th{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule-2);
+  font-weight:500;white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td:first-child{color:var(--ink);font-family:var(--display);font-size:15.5px;white-space:nowrap}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;white-space:nowrap}
+.tag{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 6px;border-radius:2px;border:1px solid currentColor;white-space:nowrap}
+.t-ok{color:var(--ok)} .t-no{color:var(--bad)} .t-am{color:var(--accent)}
+
+ul.list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+ul.list li{padding-left:18px;position:relative;color:var(--ink-2);font-size:16px}
+ul.list li::before{content:"";position:absolute;left:2px;top:.62em;width:6px;height:1px;
+  background:var(--rule-2)}
+ul.list li strong{color:var(--ink);font-family:var(--display);font-weight:600;letter-spacing:.01em}
+
+pre{margin:0;overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--ink-2)}
+pre b{color:var(--accent);font-weight:400}
+pre i{color:var(--ink-3);font-style:normal}
+
+/* ---------- mockup frame ---------- */
+figure{margin:0;display:flex;flex-direction:column;gap:0}
+.mock{border:1px solid var(--rule-2);border-radius:5px;overflow:hidden;box-shadow:var(--shadow);
+  background:#0E0D15}
+.chrome{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#0A0910;
+  border-bottom:1px solid #2C2A3A}
+.dots{display:flex;gap:5px}
+.dots i{width:8px;height:8px;border-radius:50%;background:#2C2A3A;display:block}
+.chrome .path{font-family:var(--mono);font-size:10.5px;color:#6E6A84;letter-spacing:.04em}
+figcaption{display:flex;gap:10px;padding:10px 2px 0;font-size:14px;color:var(--ink-2);
+  border-top:0;align-items:baseline}
+figcaption b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);white-space:nowrap;padding-top:2px}
+.notes{display:grid;gap:6px 20px;margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.notes div{font-size:14px;color:var(--ink-2);display:flex;gap:8px;line-height:1.45}
+.notes span{font-family:var(--mono);font-size:10px;color:var(--paper);background:var(--ink-3);
+  border-radius:2px;height:16px;min-width:16px;display:inline-flex;align-items:center;
+  justify-content:center;flex:none;margin-top:3px}
+</style>
+</head>
+<body>
+<style>
+/* code-design additions — diagrams and code blocks */
+.dg{margin:26px 0;padding:20px;background:var(--surface);border:1px solid var(--rule);border-radius:4px}
+.dg svg{display:block;margin:0 auto;max-width:100%;height:auto}
+.dg figcaption{margin-top:14px;font-size:14px;color:var(--ink-2);line-height:1.55;
+  padding-top:12px;border-top:1px solid var(--rule)}
+.dg figcaption b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);margin-right:8px}
+svg text{font-family:var(--mono);fill:var(--ink)}
+svg .lbl{font-size:12px;fill:var(--ink)}
+svg .sm{font-size:10.5px;fill:var(--ink-2)}
+svg .xs{font-size:9.5px;fill:var(--ink-3)}
+svg .bx{fill:var(--paper-2);stroke:var(--rule-2);stroke-width:1}
+svg .bx-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1}
+svg .ar{stroke:var(--ink-3);stroke-width:1.4;fill:none}
+svg .ar-a{stroke:var(--accent);stroke-width:1.6;fill:none}
+svg .dash{stroke-dasharray:4 3}
+pre.code{background:var(--surface);border:1px solid var(--rule);border-left:2px solid var(--accent);
+  border-radius:0 3px 3px 0;padding:14px 16px;overflow-x:auto;font-family:var(--mono);
+  font-size:12.5px;line-height:1.6;color:var(--ink);margin:18px 0}
+pre.code b{color:var(--accent);font-weight:600}
+pre.code i{color:var(--ink-3);font-style:normal}
+.rule-card{border:1px solid var(--rule);border-left:2px solid var(--cyan);background:var(--surface);
+  padding:13px 16px;border-radius:0 3px 3px 0;margin:18px 0;font-size:15.5px}
+.rule-card > .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--cyan);display:block;margin-bottom:7px}
+.warn{border-left-color:var(--bad)} .warn > .lbl{color:var(--bad)}
+.stack > * + *{margin-top:15px}
+</style>
+
+<header class="wrap" style="padding-top:56px;padding-bottom:10px">
+  <p class="eyebrow">Evolab — companion document</p>
+  <h1 style="font-size:clamp(34px,5vw,58px);margin:10px 0 16px">The code, explained from nothing</h1>
+  <p style="font-size:19px;color:var(--ink-2);max-width:74ch;line-height:1.6">
+    How this codebase is put together and why it is put together that way. It assumes you have
+    never seen the project, never written a genetic algorithm, and have not decided yet whether
+    you care. Every type, every module and every rule is introduced before it is used.
+  </p>
+  <p style="margin-top:18px;font-size:14px;color:var(--ink-3)">
+    This document covers <strong>code structure only</strong>. The architecture and interface
+    specification lives in <a href="technical-design.html">technical-design.html</a>; the
+    slice-by-slice build history lives in <a href="implementation.md">implementation.md</a>.
+  </p>
+</header>
+
+<nav class="wrap" style="margin:34px 0 10px">
+  <div style="border:1px solid var(--rule);border-radius:4px;background:var(--surface);padding:18px 22px">
+    <p class="eyebrow" style="margin-bottom:12px">Contents</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px 26px;font-size:14.5px">
+      <a href="#shape">1 — The shape of the whole thing</a>
+      <a href="#rules">2 — The dependency rules</a>
+      <a href="#vocab">3 — The vocabulary</a>
+      <a href="#core">4 — The pure core</a>
+      <a href="#physics">5 — The physics layer</a>
+      <a href="#app">6 — The application layer</a>
+      <a href="#server">7 — The server</a>
+      <a href="#patterns">8 — Five patterns that repeat</a>
+      <a href="#tests">9 — How the tests are designed</a>
+      <a href="#adding">10 — Adding something new</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- ============================= 1 ============================= -->
+<section id="shape" style="margin-top:56px">
+  <p class="eyebrow">01</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The shape of the whole thing</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Evolab is a program that invents ways for a two-legged robot to walk. It does not do this
+    by being told how to walk. It generates a few dozen random attempts, scores each one by
+    simulating it, breeds the better ones together, and repeats. After thirty rounds of that,
+    something walks.</p>
+
+    <p>All of it runs in a web browser. There is an optional server, but the interesting part —
+    the physics, the search, the drawing — happens in the tab.</p>
+
+    <p>The code is in <strong>four layers</strong>. The single most important thing to understand
+    before reading any file is that <strong>dependencies only ever point one way</strong>: down
+    the list below, never up it.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 860 400" role="img" aria-label="Four layers with one-way dependencies">
+      <!-- layer 4 -->
+      <rect class="bx" x="60" y="20" width="740" height="66" rx="4"/>
+      <text class="lbl" x="80" y="45">server/  —  ASP.NET Core + SQLite</text>
+      <text class="sm" x="80" y="66">saves runs, mints share links, holds the shared behaviour map. Entirely optional.</text>
+
+      <!-- layer 3 -->
+      <rect class="bx" x="60" y="110" width="740" height="88" rx="4"/>
+      <text class="lbl" x="80" y="135">apps/web/  —  the browser application</text>
+      <text class="sm" x="80" y="156">canvas drawing · Web Workers · panels · help · the DOM · everything with a screen</text>
+      <text class="sm" x="80" y="175">the only layer allowed to know that a browser exists</text>
+
+      <!-- layer 2 -->
+      <rect class="bx" x="60" y="222" width="740" height="72" rx="4"/>
+      <text class="lbl" x="80" y="247">packages/sim/  —  the physics wrapper</text>
+      <text class="sm" x="80" y="268">owns the Rapier physics engine. Builds a world, steps it, returns numbers.</text>
+
+      <!-- layer 1 -->
+      <rect class="bx-a" x="60" y="318" width="740" height="72" rx="4"/>
+      <text class="lbl" x="80" y="343">packages/evolution/  —  the pure core</text>
+      <text class="sm" x="80" y="364">the algorithm, the genome, the body plan, the scoring, the tasks. No physics. No DOM.</text>
+
+      <!-- arrows down -->
+      <path class="ar" d="M430 86 L430 104" marker-end="url(#cd-a)"/>
+      <path class="ar" d="M430 198 L430 216" marker-end="url(#cd-a)"/>
+      <path class="ar" d="M430 294 L430 312" marker-end="url(#cd-a)"/>
+      <path class="ar dash" d="M820 54 C 852 54, 852 354, 820 354" marker-end="url(#cd-a)"/>
+      <text class="xs" x="828" y="208" transform="rotate(90 828 208)">types only</text>
+
+      <defs>
+        <marker id="cd-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 1</b> An arrow means <em>may import from</em>. Nothing points upwards. The
+    bottom layer is the one that knows the most about what the program is <em>for</em> and the
+    least about how it runs — which is the opposite of how most codebases are stacked, and is
+    deliberate.</figcaption>
+  </figure>
+
+  <div class="stack" style="max-width:76ch">
+    <h3 style="font-size:22px;margin-top:34px">Why upside down?</h3>
+    <p>In a typical application the "core" is a database and everything else depends on it. Here
+    the core is <em>arithmetic</em>: given eleven numbers, what angles should the joints be at?
+    Given a trial result, what is it worth? Given a population, which pairs breed?</p>
+    <p>None of that needs a physics engine, a canvas, or a network. Keeping it in a layer that
+    <em>cannot</em> reach those things has three consequences that show up constantly:</p>
+    <ul style="max-width:74ch;padding-left:22px;line-height:1.65">
+      <li>The entire genetic algorithm runs under Node in milliseconds, against a fake evaluator.
+      Tests do not need a browser or a physics world.</li>
+      <li>The same code runs on the main thread, inside four Web Workers, and in a command-line
+      script, without a single conditional.</li>
+      <li>When something breaks you can nearly always tell which layer it broke in, because the
+      layers cannot reach into each other.</li>
+    </ul>
+  </div>
+
+  <div class="rule-card">
+    <span class="lbl">The one-sentence version</span>
+    <strong>The core computes, the middle simulates, the app displays, the server remembers</strong>
+    — and each only knows about the ones below it.
+  </div>
+</section>
+
+<!-- ============================= 2 ============================= -->
+<section id="rules" style="margin-top:64px">
+  <p class="eyebrow">02</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The dependency rules</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Four rules govern what may import what. They are written down in <code>CLAUDE.md</code> as
+    project invariants, and breaking one is treated as a bug even when the program still runs.
+    Here they are with the reasoning, because a rule you do not understand is a rule you will
+    route around.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 840 300" role="img" aria-label="Import permission matrix">
+      <text class="sm" x="215" y="34">evolution</text>
+      <text class="sm" x="330" y="34">sim</text>
+      <text class="sm" x="425" y="34">apps/web</text>
+      <text class="sm" x="545" y="34">Rapier</text>
+      <text class="sm" x="655" y="34">DOM</text>
+      <text class="sm" x="760" y="34">Node/IO</text>
+
+      <text class="sm" x="30" y="80">evolution</text>
+      <text class="sm" x="30" y="130">sim</text>
+      <text class="sm" x="30" y="180">apps/web</text>
+      <text class="sm" x="30" y="230">server</text>
+
+      <!-- row: evolution -->
+      <text x="240" y="84" class="lbl" fill="var(--ink-3)">—</text>
+      <text x="336" y="84" class="lbl" fill="var(--bad)">✕</text>
+      <text x="452" y="84" class="lbl" fill="var(--bad)">✕</text>
+      <text x="560" y="84" class="lbl" fill="var(--bad)">✕</text>
+      <text x="668" y="84" class="lbl" fill="var(--bad)">✕</text>
+      <text x="782" y="84" class="lbl" fill="var(--bad)">✕</text>
+
+      <!-- row: sim -->
+      <text x="240" y="134" class="lbl" fill="var(--ok)">✓</text>
+      <text x="336" y="134" class="lbl" fill="var(--ink-3)">—</text>
+      <text x="452" y="134" class="lbl" fill="var(--bad)">✕</text>
+      <text x="560" y="134" class="lbl" fill="var(--ok)">✓</text>
+      <text x="668" y="134" class="lbl" fill="var(--bad)">✕</text>
+      <text x="782" y="134" class="lbl" fill="var(--bad)">✕</text>
+
+      <!-- row: apps/web -->
+      <text x="240" y="184" class="lbl" fill="var(--ok)">✓</text>
+      <text x="336" y="184" class="lbl" fill="var(--ok)">✓</text>
+      <text x="452" y="184" class="lbl" fill="var(--ink-3)">—</text>
+      <text x="560" y="184" class="lbl" fill="var(--ok)">✓</text>
+      <text x="668" y="184" class="lbl" fill="var(--ok)">✓</text>
+      <text x="782" y="184" class="lbl" fill="var(--bad)">✕</text>
+
+      <!-- row: server -->
+      <text x="240" y="234" class="lbl" fill="var(--ink-3)">n/a</text>
+      <text x="336" y="234" class="lbl" fill="var(--ink-3)">n/a</text>
+      <text x="452" y="234" class="lbl" fill="var(--ink-3)">n/a</text>
+      <text x="560" y="234" class="lbl" fill="var(--ink-3)">n/a</text>
+      <text x="668" y="234" class="lbl" fill="var(--ink-3)">n/a</text>
+      <text x="782" y="234" class="lbl" fill="var(--ok)">✓</text>
+
+      <line x1="20" y1="46" x2="820" y2="46" stroke="var(--rule)"/>
+      <line x1="20" y1="96" x2="820" y2="96" stroke="var(--rule)"/>
+      <line x1="20" y1="146" x2="820" y2="146" stroke="var(--rule)"/>
+      <line x1="20" y1="196" x2="820" y2="196" stroke="var(--rule)"/>
+      <line x1="130" y1="14" x2="130" y2="250" stroke="var(--rule)"/>
+      <text class="xs" x="20" y="278">The server is a separate program in a separate language. It shares no code with the browser — only JSON shapes.</text>
+    </svg>
+    <figcaption><b>Fig 2</b> Rows are "who is importing", columns are "what they want". The whole
+    of column&nbsp;1 being open and row&nbsp;1 being closed is the point of the design.</figcaption>
+  </figure>
+
+  <div class="stack" style="max-width:76ch">
+    <h3 style="font-size:20px;margin-top:30px">Rule 1 — Physics steps at a fixed rate</h3>
+    <p>The simulation always advances in increments of exactly <code>1/240</code> of a second,
+    never by however long the last animation frame happened to take. A physics engine given
+    variable time steps produces different results on a fast machine than a slow one, and every
+    reproducibility guarantee in the project collapses.</p>
+
+    <h3 style="font-size:20px;margin-top:26px">Rule 2 — Randomness is seeded, always</h3>
+    <p>There is no <code>Math.random()</code> anywhere in <code>packages/</code>. Random numbers
+    come from an <code>Rng</code> object that is created from a seed and passed explicitly as a
+    function argument. Give it the same seed and it produces the same sequence for ever.</p>
+    <p>This is what makes it possible to say "seed 4417, thirty generations, fitness 6.4598" and
+    have that be true on any machine — which in turn is what makes an automated test able to
+    catch an accidental change to the algorithm.</p>
+
+    <h3 style="font-size:20px;margin-top:26px">Rule 3 — The core stays pure</h3>
+    <p><code>packages/evolution</code> may not import the physics engine, touch the DOM, read a
+    file, or set a timer. If a function in there needs to simulate something, <strong>it takes a
+    function that does the simulating as an argument</strong>. That pattern appears three times
+    in the codebase and section 8 explains it properly.</p>
+
+    <h3 style="font-size:20px;margin-top:26px">Rule 4 — The physics layer owns the physics</h3>
+    <p><code>packages/sim</code> is the only place that imports Rapier, the physics engine. It
+    turns a body plan into a world, steps that world, and hands back plain numbers. It does not
+    draw anything, and it does not know what a genome is.</p>
+  </div>
+
+  <div class="rule-card warn">
+    <span class="lbl">What breaking these actually costs</span>
+    These are not stylistic preferences. A single <code>Math.random()</code> in the core would
+    make runs unreproducible, silently invalidate the regression test that guards the whole
+    algorithm, and make every bug in the search unrepeatable. The rules are cheap to keep and
+    expensive to restore.
+  </div>
+</section>
+
+<!-- ============================= 3 ============================= -->
+<section id="vocab" style="margin-top:64px">
+  <p class="eyebrow">03</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The vocabulary</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Nine types carry almost everything. Learn these and the rest of the codebase reads as
+    plumbing between them. They are introduced here in the order data flows through them.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 880 460" role="img" aria-label="How data flows through the nine core types">
+      <!-- Genome -->
+      <rect class="bx-a" x="30" y="24" width="150" height="52" rx="4"/>
+      <text class="lbl" x="46" y="46">Genome</text>
+      <text class="xs" x="46" y="64">Float32Array(11), all 0–1</text>
+
+      <path class="ar-a" d="M182 50 L246 50" marker-end="url(#cd-b)"/>
+      <text class="xs" x="188" y="42">decodeGenome</text>
+
+      <!-- GaitParams -->
+      <rect class="bx" x="248" y="24" width="160" height="52" rx="4"/>
+      <text class="lbl" x="264" y="46">GaitParams</text>
+      <text class="xs" x="264" y="64">frequency, hip{...}, ...</text>
+
+      <!-- BipedSpec -->
+      <rect class="bx" x="30" y="120" width="150" height="52" rx="4"/>
+      <text class="lbl" x="46" y="142">BipedSpec</text>
+      <text class="xs" x="46" y="160">lengths, widths, density</text>
+
+      <path class="ar" d="M182 146 L246 146" marker-end="url(#cd-b)"/>
+      <text class="xs" x="192" y="138">buildBiped</text>
+
+      <!-- Morphology -->
+      <rect class="bx" x="248" y="120" width="160" height="52" rx="4"/>
+      <text class="lbl" x="264" y="142">Morphology</text>
+      <text class="xs" x="264" y="160">segments[] + joints[]</text>
+
+      <!-- gaitTargets -->
+      <path class="ar-a" d="M410 50 C 460 50, 460 92, 500 92" marker-end="url(#cd-b)"/>
+      <path class="ar" d="M410 146 C 460 146, 460 104, 500 104" marker-end="url(#cd-b)"/>
+      <rect class="bx-a" x="502" y="72" width="170" height="52" rx="4"/>
+      <text class="lbl" x="518" y="94">joint targets</text>
+      <text class="xs" x="518" y="112">Map&lt;jointId, radians&gt;</text>
+
+      <!-- Sim -->
+      <rect class="bx" x="502" y="168" width="170" height="52" rx="4"/>
+      <text class="lbl" x="518" y="190">Sim</text>
+      <text class="xs" x="518" y="208">a live Rapier world</text>
+      <path class="ar-a" d="M587 126 L587 164" marker-end="url(#cd-b)"/>
+      <text class="xs" x="594" y="150">setJointTargets</text>
+
+      <!-- Snapshot -->
+      <rect class="bx" x="502" y="264" width="170" height="52" rx="4"/>
+      <text class="lbl" x="518" y="286">Snapshot</text>
+      <text class="xs" x="518" y="304">one frame: where is everything</text>
+      <path class="ar" d="M587 222 L587 260" marker-end="url(#cd-b)"/>
+      <text class="xs" x="594" y="246">snapshot()</text>
+
+      <!-- TrialResult -->
+      <rect class="bx-a" x="700" y="264" width="150" height="52" rx="4"/>
+      <text class="lbl" x="716" y="286">TrialResult</text>
+      <text class="xs" x="716" y="304">distance, fell, duty…</text>
+      <path class="ar-a" d="M676 290 L696 290" marker-end="url(#cd-b)"/>
+
+      <!-- fitness -->
+      <rect class="bx" x="700" y="360" width="150" height="52" rx="4"/>
+      <text class="lbl" x="716" y="382">fitness</text>
+      <text class="xs" x="716" y="400">one number</text>
+      <path class="ar-a" d="M775 318 L775 356" marker-end="url(#cd-b)"/>
+      <text class="xs" x="700" y="342">score()</text>
+
+      <!-- archive -->
+      <rect class="bx" x="470" y="360" width="180" height="52" rx="4"/>
+      <text class="lbl" x="486" y="382">Archive cell</text>
+      <text class="xs" x="486" y="400">filed by behaviour, not score</text>
+      <path class="ar" d="M700 300 C 620 300, 600 340, 580 356" marker-end="url(#cd-b)"/>
+      <text class="xs" x="600" y="332">behaviourOf()</text>
+
+      <!-- loop back -->
+      <path class="ar-a dash" d="M700 386 C 300 460, 120 300, 105 82" marker-end="url(#cd-b)"/>
+      <text class="xs" x="200" y="440">fitness decides which genomes breed — the loop closes here</text>
+
+      <defs>
+        <marker id="cd-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 3</b> The full journey of one robot. Amber is the path a genome takes;
+    grey is the body it is being tested on. Everything to the left of <code>Sim</code> is pure
+    arithmetic and testable without a physics engine.</figcaption>
+  </figure>
+
+  <div class="tbl" style="margin-top:26px"><table>
+    <thead><tr><th>Type</th><th>Is</th><th>Lives in</th></tr></thead>
+    <tbody>
+      <tr><td><code>Genome</code></td><td>Eleven numbers between 0 and 1. The thing evolution actually manipulates. It means nothing on its own.</td><td>evolution/controller</td></tr>
+      <tr><td><code>GaitParams</code></td><td>Those eleven numbers decoded into things with units — a frequency in hertz, three angles per joint. What the sliders show.</td><td>evolution/controller</td></tr>
+      <tr><td><code>BipedSpec</code></td><td>A description of the robot's body: segment lengths and widths, foot size, density. Editable in the UI.</td><td>evolution/morphology</td></tr>
+      <tr><td><code>Morphology</code></td><td>A spec turned into concrete geometry — a list of boxes and a list of joints connecting them, positioned so the feet rest exactly on the ground.</td><td>evolution/morphology</td></tr>
+      <tr><td><code>Sim</code></td><td>A live physics world. The only stateful class in the project, because a physics world genuinely has a lifecycle.</td><td>sim/world</td></tr>
+      <tr><td><code>Snapshot</code></td><td>One instant: where every box is, what angle every joint is at, whether it has fallen. Read out of a <code>Sim</code>, never stored inside one.</td><td>sim/world</td></tr>
+      <tr><td><code>TrialResult</code></td><td>What a whole trial produced: distance, time upright, effort, whether it fell, plus two descriptors of <em>how</em> it moved.</td><td>evolution/fitness</td></tr>
+      <tr><td><code>Objective</code></td><td>Weights saying how much distance, staying upright and effort each count. Changing this changes what evolution optimises for.</td><td>evolution/fitness</td></tr>
+      <tr><td><code>Archive</code></td><td>A 24 × 24 grid of the best genome found for each <em>kind</em> of walk, keyed by stride length and duty factor.</td><td>evolution/archive</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="rule-card">
+    <span class="lbl">The distinction that matters most</span>
+    <code>TrialResult</code> holds both <strong>quality</strong> (distance, upright, effort — the
+    things <code>score()</code> reads) and <strong>behaviour</strong> (stride length, duty factor
+    — which <code>score()</code> deliberately ignores). Nothing selects for behaviour. That is
+    what makes the behaviour map an honest record of what the search stumbled into rather than a
+    second thing it was aiming at.
+  </div>
+</section>
+
+<!-- ============================= 4 ============================= -->
+<section id="core" style="margin-top:64px">
+  <p class="eyebrow">04</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The pure core — <code>packages/evolution</code></h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Nine files, no dependencies at all — not one line of it imports anything outside itself.
+    This is where the program's actual ideas live.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>rng.ts</code> — repeatable randomness</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>A small class implementing <em>xoshiro128**</em>, a well-known pseudo-random generator.
+    "Pseudo-random" means the numbers look random but are entirely determined by the starting
+    seed. Create two with the same seed and they produce identical sequences for ever.</p>
+    <p>It is the only class in the package, because it is the only thing with genuine state: each
+    number it produces changes what the next one will be. Everything else is a plain function.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>controller.ts</code> — turning numbers into movement</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The robot has six joints: a hip, knee and ankle on each leg. Each one is driven like a
+    pendulum — it swings back and forth on a repeating cycle. Three numbers describe such a
+    swing:</p>
+    <ul style="max-width:74ch;padding-left:22px;line-height:1.65">
+      <li><strong>amplitude</strong> — how far it swings</li>
+      <li><strong>phase</strong> — where in the cycle it starts, so the two legs can be offset</li>
+      <li><strong>centre</strong> — the angle it swings around</li>
+    </ul>
+    <p>Three joint kinds × three numbers = nine, plus an overall <strong>frequency</strong> (how
+    fast the cycle runs) and a <strong>balance gain</strong> (how strongly the robot leans back
+    when it feels itself pitching forward). Eleven numbers, and that is the entire vocabulary
+    available to the robot.</p>
+    <p>The left and right legs use the same nine numbers, driven half a cycle apart. That is why
+    a robot cannot learn to limp, and why it cannot learn to turn.</p>
+  </div>
+
+  <pre class="code"><i>// the whole controller interface, in three functions</i>
+<b>decodeGenome</b>(genes: Genome): GaitParams      <i>// 11 raw numbers → things with units</i>
+<b>encodeGenome</b>(params: GaitParams): Genome     <i>// and back, for hand-tuned gaits</i>
+<b>gaitTargets</b>(morph, params, time, state, out) <i>// → what angle each joint should be at now</i></pre>
+
+  <div class="stack" style="max-width:76ch">
+    <p><code>gaitTargets</code> is called sixty times per simulated second and writes into a map
+    the caller supplies, rather than allocating a new one. It runs tens of millions of times in a
+    long study, so it is one of the very few places in the codebase written for speed.</p>
+    <p>The <code>state</code> argument is <code>ControlState</code> — just
+    <code>{ pitch, pitchRate }</code>, the robot's sense of which way up it is. That is the
+    <em>only</em> thing the controller knows about the world. It cannot see the ground, an
+    obstacle, or where it is going. Understanding that one fact explains most of the project's
+    later findings.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>morphology.ts</code> — building a body</h3>
+  <div class="stack" style="max-width:76ch">
+    <p><code>buildBiped(spec)</code> takes editable measurements and produces a
+    <code>Morphology</code>: a list of boxes with positions, sizes and densities, and a list of
+    joints with the exact point on each box where they attach.</p>
+    <p>Because the geometry is <em>derived</em> rather than stored, the chain always closes: the
+    ankle is always at the bottom of the shank, and the feet always rest exactly on ground level.
+    You cannot produce an incoherent robot by editing a slider.</p>
+    <p>The file also computes <code>bodyStats</code> — mass, standing height, balance margin, hip
+    load — and <code>validateBody</code>, which explains <em>why</em> a body will not work rather
+    than only refusing it.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>operators.ts</code> — the genetic machinery</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Four small functions, each a standard technique with a fixed, named constant:</p>
+  </div>
+
+  <div class="tbl" style="margin-top:16px"><table>
+    <thead><tr><th>Function</th><th>What it does</th><th>Setting</th></tr></thead>
+    <tbody>
+      <tr><td><code>randomGenome</code></td><td>Eleven random numbers. This is generation zero — nobody designs it.</td><td>—</td></tr>
+      <tr><td><code>tournament</code></td><td>Picks three individuals at random and returns the best. Repeat to pick each parent.</td><td>size 3</td></tr>
+      <tr><td><code>sbx</code></td><td>Simulated binary crossover. Blends two parent genomes into two children, usually landing near the parents and occasionally further out.</td><td>η = 15</td></tr>
+      <tr><td><code>mutate</code></td><td>Polynomial mutation. Nudges individual genes by a small random amount.</td><td>η = 20</td></tr>
+      <tr><td><code>diversity</code></td><td>Mean distance between all genome pairs — how different the population still is.</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="rule-card">
+    <span class="lbl">Why a tournament rather than "pick the best two"</span>
+    Because picking three at random and keeping the winner means a weak genome can still get
+    lucky. Always breeding the very best would collapse the population onto one answer within a
+    handful of generations, and the search would stop finding anything new.
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>island.ts</code> — one generation</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>An <strong>island</strong> is a population plus the settings it runs under plus its own
+    random generator. The name comes from the island model of evolution: several populations
+    evolving separately and occasionally exchanging a few members.</p>
+    <p>One generation goes: score everyone, sort, keep the best two unchanged, then repeatedly
+    pick two parents and breed them until the population is full again.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 880 380" role="img" aria-label="One generation, step by step">
+      <rect class="bx" x="24" y="30" width="150" height="60" rx="4"/>
+      <text class="lbl" x="40" y="54">population</text>
+      <text class="xs" x="40" y="72">24 genomes</text>
+
+      <path class="ar" d="M176 60 L236 60" marker-end="url(#cd-c)"/>
+      <rect class="bx-a" x="238" y="30" width="160" height="60" rx="4"/>
+      <text class="lbl" x="254" y="54">evaluate</text>
+      <text class="xs" x="254" y="72">only the unscored ones</text>
+
+      <path class="ar" d="M400 60 L460 60" marker-end="url(#cd-c)"/>
+      <rect class="bx" x="462" y="30" width="150" height="60" rx="4"/>
+      <text class="lbl" x="478" y="54">rank</text>
+      <text class="xs" x="478" y="72">sort by fitness</text>
+
+      <path class="ar" d="M614 60 L674 60" marker-end="url(#cd-c)"/>
+      <rect class="bx" x="676" y="30" width="176" height="60" rx="4"/>
+      <text class="lbl" x="692" y="54">keep 2 elites</text>
+      <text class="xs" x="692" y="72">carried over unchanged</text>
+
+      <path class="ar" d="M764 92 L764 126" marker-end="url(#cd-c)"/>
+
+      <!-- breeding loop box -->
+      <rect x="120" y="128" width="736" height="150" rx="5" fill="none" stroke="var(--accent)" stroke-dasharray="5 4"/>
+      <text class="xs" x="134" y="148" fill="var(--accent)">repeat until the population is full again — ELEVEN TIMES</text>
+
+      <rect class="bx" x="150" y="164" width="180" height="60" rx="4"/>
+      <text class="lbl" x="166" y="188">select</text>
+      <text class="xs" x="166" y="206">two tournaments</text>
+
+      <path class="ar-a" d="M332 194 L392 194" marker-end="url(#cd-c)"/>
+      <rect class="bx" x="394" y="164" width="180" height="60" rx="4"/>
+      <text class="lbl" x="410" y="188">crossover</text>
+      <text class="xs" x="410" y="206">blend → two children</text>
+
+      <path class="ar-a" d="M576 194 L636 194" marker-end="url(#cd-c)"/>
+      <rect class="bx" x="638" y="164" width="180" height="60" rx="4"/>
+      <text class="lbl" x="654" y="188">mutate</text>
+      <text class="xs" x="654" y="206">nudge some genes</text>
+
+      <path class="ar-a" d="M728 226 C 728 252, 300 252, 240 252 L 240 230" marker-end="url(#cd-c)"/>
+
+      <path class="ar" d="M488 280 L488 310" marker-end="url(#cd-c)"/>
+      <rect class="bx" x="380" y="312" width="216" height="52" rx="4"/>
+      <text class="lbl" x="396" y="334">the next population</text>
+      <text class="xs" x="396" y="352">2 elites + 22 children</text>
+
+      <defs>
+        <marker id="cd-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 4</b> The dashed box is the part that matters for correctness. Breeding
+    happens <strong>one pair at a time</strong> — select, cross, mutate, then the next pair —
+    never "all the selections, then all the crossovers". Both orders produce valid children, but
+    they consume random numbers in a different sequence and therefore produce entirely different
+    populations.</figcaption>
+  </figure>
+
+  <div class="rule-card warn">
+    <span class="lbl">The trap in this file</span>
+    Grouping the phases for tidiness would silently invalidate every stored gait in the project
+    and change the pinned regression number. If you touch <code>breed()</code>, the way you find
+    out you were wrong is that <code>npm run evolve</code> stops printing 6.4598.
+  </div>
+
+  <h3 style="font-size:20px;margin-top:30px">The generation is a JavaScript generator</h3>
+  <div class="stack" style="max-width:76ch">
+    <p><code>generation()</code> is written with <code>function*</code>, meaning it can pause and
+    hand control back to its caller at defined points. Normal runs drain it as fast as possible
+    and never look at the pauses:</p>
+  </div>
+
+  <pre class="code"><b>export function</b> stepGeneration(island, evaluate) {
+  <b>const</b> it = generation(island, evaluate);
+  <b>let</b> step = it.next();
+  <b>while</b> (!step.done) step = it.next();   <i>// drain, ignoring every stage</i>
+  <b>return</b> step.value;
+}</pre>
+
+  <div class="stack" style="max-width:76ch">
+    <p>But the teaching screen — the "stepper" — advances it one pause at a time and draws what
+    it finds. This means <strong>the screen that explains the algorithm is running the algorithm,
+    not an illustration of it</strong>. A test asserts that a traced run and an untraced run
+    produce identical results, because the moment that stops being true the teaching screen
+    becomes a lie.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>fitness.ts</code> — what "good" means</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Holds <code>TrialResult</code> (what a trial produced) and <code>score()</code> (what that
+    is worth). Scoring mixes three terms in proportions given by an <code>Objective</code>:
+    distance travelled, seconds spent upright, and effort spent — where effort is total joint
+    movement, above a budget.</p>
+    <p><code>TrialResult</code> lives here rather than in the physics package on purpose: it is a
+    description of an outcome, not a piece of physics, and the core is not allowed to import the
+    simulator anyway.</p>
+  </div>
+
+  <div class="rule-card">
+    <span class="lbl">An honest naming decision worth copying</span>
+    The design called for energy in joules. The physics engine's JavaScript binding does not
+    expose the forces its motors applied, so joules cannot be measured. The field is therefore
+    called <code>effort</code> and documented as "total joint travel in radians" — named for what
+    it measures rather than for what it approximates. The same decision recurs later, where cost
+    of transport becomes "joint travel per metre".
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>archive.ts</code> — a map of what was found</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The genetic algorithm answers one question: what is the best gait? The archive answers a
+    different one: <em>what kinds of gait are there, and how good is the best of each kind?</em></p>
+    <p>It is a 24 × 24 grid. Along one axis, <strong>stride length</strong> — how far the robot
+    travels between one footfall and the next of the same foot. Up the other,
+    <strong>duty factor</strong> — the fraction of time a foot is on the ground. Every cell holds
+    the fittest genome that has ever behaved that way.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 820 340" role="img" aria-label="Anatomy of the behaviour archive">
+      <!-- grid -->
+      <g transform="translate(90,30)">
+        <rect x="0" y="0" width="240" height="240" fill="var(--paper-2)" stroke="var(--rule-2)"/>
+        <g stroke="var(--rule)" stroke-width=".5">
+          <path d="M40 0V240 M80 0V240 M120 0V240 M160 0V240 M200 0V240"/>
+          <path d="M0 40H240 M0 80H240 M0 120H240 M0 160H240 M0 200H240"/>
+        </g>
+        <rect x="120" y="80" width="40" height="40" fill="var(--accent-fill)" opacity=".85"/>
+        <rect x="80" y="120" width="40" height="40" fill="var(--cyan)" opacity=".5"/>
+        <rect x="160" y="80" width="40" height="40" fill="var(--cyan)" opacity=".3"/>
+        <text class="xs" x="-70" y="130" transform="rotate(-90 -70 130)">duty factor  0.5 → 1.0</text>
+        <text class="xs" x="60" y="264">stride length  0 → 1.4 m</text>
+      </g>
+
+      <path class="ar-a" d="M340 118 L430 100" marker-end="url(#cd-d)"/>
+      <rect class="bx-a" x="434" y="62" width="330" height="86" rx="4"/>
+      <text class="lbl" x="450" y="86">one cell holds</text>
+      <text class="xs" x="450" y="106">genes — a copy, never a live reference</text>
+      <text class="xs" x="450" y="122">fitness — how good this one was</text>
+      <text class="xs" x="450" y="138">behaviour — the unbinned stride and duty it actually had</text>
+
+      <rect class="bx" x="434" y="176" width="330" height="128" rx="4"/>
+      <text class="lbl" x="450" y="200">the rule for claiming a cell</text>
+      <text class="xs" x="450" y="222">1.  a trial that fell is rejected outright — it describes</text>
+      <text class="xs" x="450" y="238">     a topple, not a gait</text>
+      <text class="xs" x="450" y="258">2.  higher fitness takes the cell</text>
+      <text class="xs" x="450" y="278">3.  <tspan font-weight="700">ties lose</tspan> — the incumbent stays, so a settled cell</text>
+      <text class="xs" x="450" y="294">     has genuinely settled rather than churning</text>
+
+      <defs>
+        <marker id="cd-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 5</b> Neither axis is scored. Nothing in the search tries to fill the grid,
+    which is exactly what makes its coverage an honest measure of what the search explored rather
+    than a second target it was aiming at.</figcaption>
+  </figure>
+
+  <div class="rule-card">
+    <span class="lbl">Observer, never input</span>
+    A test drains an island's archive every generation and asserts the population comes out
+    bit-identical. Remove the archive entirely and the search is unchanged. That is what makes it
+    an observation rather than a second algorithm.
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>terrain.ts</code> and <code>tasks.ts</code> — testing a gait</h3>
+  <div class="stack" style="max-width:76ch">
+    <p><code>terrain.ts</code> turns a description — flat, a ramp of so many degrees, steps of so
+    many centimetres, seeded rough ground — into an array of ground heights sampled every two
+    centimetres, plus a function answering "how high is the ground at this x?".</p>
+    <p>It is pure arithmetic with no physics engine in it, which is why it lives in the core
+    rather than in the simulator: <code>tasks.ts</code> needs to name a terrain, and the core is
+    not allowed to import the simulator.</p>
+    <p><code>tasks.ts</code> holds six tasks as plain data — terrain, duration, any impulses, a
+    body change, a metric name and three thresholds — plus the arithmetic that turns trial
+    results into a scorecard. Nothing in it simulates anything; running the trials is somebody
+    else's job, which is section 8's first pattern.</p>
+  </div>
+</section>
+
+<!-- ============================= 5 ============================= -->
+<section id="physics" style="margin-top:64px">
+  <p class="eyebrow">05</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The physics layer — <code>packages/sim</code></h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Four files. This layer owns Rapier — a physics engine originally written in Rust and
+    compiled to WebAssembly so it runs in a browser — and nothing else in the project imports it.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:30px"><code>world.ts</code> — the <code>Sim</code> class</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The constructor turns a <code>Morphology</code> into a live world: one rigid body per
+    segment, one revolute joint per joint, collision filtering so the robot's own parts pass
+    through each other but not through the ground, and the ground itself.</p>
+    <p>Three things about it are worth knowing before you touch it.</p>
+  </div>
+
+  <div class="stack" style="max-width:76ch">
+    <p><strong>Motors are springs, not rigid links.</strong> Each joint is driven towards a target
+    angle by a motor with a stiffness setting. That number needs to be far larger than a first
+    guess suggests — around 80,000. Below roughly half that, the robot cannot hold a standing pose
+    at all and topples in about a second, which reads exactly like a fundamental limitation of the
+    approach and is not one. An entire debugging session went into that.</p>
+
+    <p><strong>Memory must be freed by hand.</strong> Rapier objects live in WebAssembly memory,
+    which JavaScript's garbage collector does not manage. Every <code>Sim</code> must have
+    <code>dispose()</code> called on it, and every place that creates one in a loop does so in a
+    <code>finally</code> block. A leak here is the most likely cause of a run that mysteriously
+    slows down and then dies.</p>
+
+    <p><strong>Flat ground is a special case on purpose.</strong> Terrain is built from the best
+    shape for each profile — a ramp is one rotated slab, steps are one slab per tread — but flat
+    ground keeps the exact collider it has always had, constructed exactly the way it always was.
+    Moving the same offset from the body onto the collider is geometrically identical and moved
+    the pinned regression number from 6.4598 to 5.8015.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>evaluate.ts</code> — the inner loop</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>One function runs one genome for one trial and returns numbers. In a long study it executes
+    tens of thousands of times, so it is the hottest code in the project.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 860 260" role="img" aria-label="What happens at each rate inside a trial">
+      <text class="sm" x="24" y="34">240 Hz</text>
+      <text class="xs" x="24" y="50">physics</text>
+      <g>
+        <line x1="110" y1="30" x2="820" y2="30" stroke="var(--rule-2)"/>
+        <g fill="var(--ink-3)">
+          <circle cx="110" cy="30" r="3"/><circle cx="154" cy="30" r="3"/><circle cx="198" cy="30" r="3"/>
+          <circle cx="242" cy="30" r="3"/><circle cx="286" cy="30" r="3"/><circle cx="330" cy="30" r="3"/>
+          <circle cx="374" cy="30" r="3"/><circle cx="418" cy="30" r="3"/><circle cx="462" cy="30" r="3"/>
+          <circle cx="506" cy="30" r="3"/><circle cx="550" cy="30" r="3"/><circle cx="594" cy="30" r="3"/>
+          <circle cx="638" cy="30" r="3"/><circle cx="682" cy="30" r="3"/><circle cx="726" cy="30" r="3"/>
+          <circle cx="770" cy="30" r="3"/><circle cx="814" cy="30" r="3"/>
+        </g>
+      </g>
+
+      <text class="sm" x="24" y="104">60 Hz</text>
+      <text class="xs" x="24" y="120">control</text>
+      <line x1="110" y1="100" x2="820" y2="100" stroke="var(--rule-2)"/>
+      <g fill="var(--accent)">
+        <circle cx="110" cy="100" r="4.5"/><circle cx="286" cy="100" r="4.5"/><circle cx="462" cy="100" r="4.5"/>
+        <circle cx="638" cy="100" r="4.5"/><circle cx="814" cy="100" r="4.5"/>
+      </g>
+      <g stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3">
+        <path d="M110 34V96 M286 34V96 M462 34V96 M638 34V96 M814 34V96"/>
+      </g>
+      <text class="xs" x="120" y="122">gaitTargets → setJointTargets, every 4th step</text>
+
+      <text class="sm" x="24" y="174">60 Hz</text>
+      <text class="xs" x="24" y="190">recording</text>
+      <line x1="110" y1="170" x2="820" y2="170" stroke="var(--rule-2)"/>
+      <g fill="var(--cyan)">
+        <circle cx="110" cy="170" r="4.5"/><circle cx="286" cy="170" r="4.5"/><circle cx="462" cy="170" r="4.5"/>
+        <circle cx="638" cy="170" r="4.5"/><circle cx="814" cy="170" r="4.5"/>
+      </g>
+      <text class="xs" x="120" y="192">optional — off by default, and it must stay that way</text>
+
+      <text class="sm" x="24" y="234">every step</text>
+      <line x1="110" y1="230" x2="820" y2="230" stroke="var(--rule-2)"/>
+      <text class="xs" x="120" y="222">read a snapshot · test each foot for ground contact · accumulate effort · check for a fall</text>
+    </svg>
+    <figcaption><b>Fig 6</b> Three different rates inside one loop. The control rate is a quarter
+    of the physics rate because a real controller does not get to act on every microsecond, and
+    because doing it four times less often is four times cheaper in the hottest loop in the
+    program.</figcaption>
+  </figure>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Foot contact is decided by <strong>geometry, not by asking the physics engine</strong>: the
+    lowest corner of the foot box is computed and compared against the ground height beneath it,
+    with a five-millimetre tolerance. That threshold was chosen by measurement — sweeping it from
+    1 mm to 10 mm changes nothing, and it collapses at 20 mm where separate steps start merging
+    into one.</p>
+    <p>Recording is opt-in and allocates nothing when it is off. That matters: the search runs
+    this function tens of thousands of times per study and never wants a recording, while the one
+    genome a person is looking at wants a detailed one.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>record.ts</code> — replay data</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>A <code>Recording</code> is a set of flat typed arrays — positions, angles, contact flags —
+    sampled sixty times a second. Flat arrays rather than an array of objects because the format
+    is designed to be handed between threads cheaply and because it is read by three separate
+    display surfaces.</p>
+    <p><code>snapshotAt(recording, frame)</code> rebuilds a <code>Snapshot</code>, which means one
+    scrubber control drives both the 2D and the 3D renderer from the same source and they cannot
+    drift apart.</p>
+  </div>
+</section>
+
+<!-- ============================= 6 ============================= -->
+<section id="app" style="margin-top:64px">
+  <p class="eyebrow">06</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The application layer — <code>apps/web</code></h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>This is the only layer that knows a browser exists. It is organised into six folders by
+    <em>what a file is responsible for</em>, not by what feature it belongs to.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 880 400" role="img" aria-label="Module map of the browser application">
+      <rect class="bx-a" x="320" y="16" width="240" height="52" rx="4"/>
+      <text class="lbl" x="336" y="40">main.ts</text>
+      <text class="xs" x="336" y="58">wiring, and the animation frame</text>
+
+      <g>
+        <rect class="bx" x="20" y="120" width="180" height="76" rx="4"/>
+        <text class="lbl" x="36" y="144">run/</text>
+        <text class="xs" x="36" y="162">state.ts — one object holding</text>
+        <text class="xs" x="36" y="177">everything the app is doing</text>
+
+        <rect class="bx" x="216" y="120" width="180" height="76" rx="4"/>
+        <text class="lbl" x="232" y="144">workers/</text>
+        <text class="xs" x="232" y="162">the thread pool and the</text>
+        <text class="xs" x="232" y="177">message protocol</text>
+
+        <rect class="bx" x="412" y="120" width="180" height="76" rx="4"/>
+        <text class="lbl" x="428" y="144">render/</text>
+        <text class="xs" x="428" y="162">canvas drawing — 2D, 3D,</text>
+        <text class="xs" x="428" y="177">charts, gait analysis</text>
+
+        <rect class="bx" x="608" y="120" width="180" height="76" rx="4"/>
+        <text class="lbl" x="624" y="144">ui/</text>
+        <text class="xs" x="624" y="162">panels made of DOM —</text>
+        <text class="xs" x="624" y="177">sliders, editor, help</text>
+
+        <rect class="bx" x="216" y="228" width="180" height="76" rx="4"/>
+        <text class="lbl" x="232" y="252">net/</text>
+        <text class="xs" x="232" y="270">the only place that calls</text>
+        <text class="xs" x="232" y="285">fetch. Never throws.</text>
+
+        <rect class="bx" x="412" y="228" width="180" height="76" rx="4"/>
+        <text class="lbl" x="428" y="252">challenges/</text>
+        <text class="xs" x="428" y="270">eleven teaching cards,</text>
+        <text class="xs" x="428" y="285">as data</text>
+      </g>
+
+      <g class="ar">
+        <path d="M420 70 C 300 84, 130 96, 110 116" marker-end="url(#cd-e)"/>
+        <path d="M424 70 C 380 90, 320 100, 306 116" marker-end="url(#cd-e)"/>
+        <path d="M452 70 L 500 116" marker-end="url(#cd-e)"/>
+        <path d="M470 70 C 600 84, 680 98, 696 116" marker-end="url(#cd-e)"/>
+        <path d="M400 68 C 250 130, 250 190, 290 224" marker-end="url(#cd-e)"/>
+        <path d="M446 70 C 470 150, 480 190, 494 224" marker-end="url(#cd-e)"/>
+      </g>
+
+      <rect x="20" y="336" width="768" height="46" rx="4" fill="none" stroke="var(--rule-2)" stroke-dasharray="4 3"/>
+      <text class="xs" x="36" y="356">Folders do not import each other sideways. Everything meets in main.ts, which is why that file</text>
+      <text class="xs" x="36" y="372">is the largest in the project — it is wiring, not logic.</text>
+
+      <defs>
+        <marker id="cd-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 7</b> <code>main.ts</code> is deliberately the only place that knows about
+    everything. Each folder below it is independently understandable, and most of them are
+    independently testable.</figcaption>
+  </figure>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>run/state.ts</code> — what the app is doing</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>One mutable object: the worker pool, the fitness history, the current champion, whether the
+    search is running, which of the three stages the interface is in, which gait the sliders hold.
+    There is no state-management library. For an application with one screen and one user, a
+    plain object read by a render loop is the whole of what is needed.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>workers/</code> — running the search off the main thread</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>A browser tab has one thread for JavaScript, and the same thread draws the screen. Running
+    a search on it would freeze the interface. So the search runs in <strong>Web Workers</strong>
+    — separate threads that share no memory and communicate only by passing messages.</p>
+    <p>Each worker holds one island: its own population, its own random generator. Every five
+    generations each island sends its two best genomes to the next worker round a ring.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 880 400" role="img" aria-label="Worker topology and message flow">
+      <rect class="bx-a" x="330" y="16" width="220" height="56" rx="4"/>
+      <text class="lbl" x="346" y="40">main thread</text>
+      <text class="xs" x="346" y="58">draws · folds results together</text>
+
+      <g>
+        <rect class="bx" x="40" y="140" width="150" height="66" rx="4"/>
+        <text class="lbl" x="56" y="164">worker 0</text>
+        <text class="xs" x="56" y="182">island · own Rng</text>
+        <text class="xs" x="56" y="197">own Rapier instance</text>
+
+        <rect class="bx" x="230" y="140" width="150" height="66" rx="4"/>
+        <text class="lbl" x="246" y="164">worker 1</text>
+
+        <rect class="bx" x="420" y="140" width="150" height="66" rx="4"/>
+        <text class="lbl" x="436" y="164">worker 2</text>
+
+        <rect class="bx" x="610" y="140" width="150" height="66" rx="4"/>
+        <text class="lbl" x="626" y="164">worker 3</text>
+
+        <rect class="bx" x="790" y="140" width="60" height="66" rx="4" opacity=".55"/>
+        <text class="xs" x="800" y="168">score-</text>
+        <text class="xs" x="800" y="182">card</text>
+      </g>
+
+      <g class="ar">
+        <path d="M400 74 L 130 134" marker-end="url(#cd-f)"/>
+        <path d="M420 74 L 300 134" marker-end="url(#cd-f)"/>
+        <path d="M450 74 L 490 134" marker-end="url(#cd-f)"/>
+        <path d="M480 74 L 670 134" marker-end="url(#cd-f)"/>
+        <path d="M540 70 C 700 80, 810 96, 818 134" marker-end="url(#cd-f)" stroke-dasharray="4 3"/>
+      </g>
+
+      <!-- migration ring -->
+      <g class="ar-a">
+        <path d="M192 230 C 210 260, 210 260, 228 230" marker-end="url(#cd-g)"/>
+        <path d="M382 230 C 400 260, 400 260, 418 230" marker-end="url(#cd-g)"/>
+        <path d="M572 230 C 590 260, 590 260, 608 230" marker-end="url(#cd-g)"/>
+        <path d="M690 214 C 700 300, 120 300, 112 214" marker-end="url(#cd-g)"/>
+      </g>
+      <text class="xs" x="330" y="290" fill="var(--accent)">two elites, every five generations, round the ring</text>
+
+      <rect class="bx" x="120" y="322" width="640" height="62" rx="4"/>
+      <text class="lbl" x="136" y="344">messages, both ways</text>
+      <text class="xs" x="136" y="362">→ init · run · pause · immigrate · scorecard</text>
+      <text class="xs" x="136" y="378">← ready · generation · emigrants · paused · scorecard · error</text>
+
+      <defs>
+        <marker id="cd-f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+        <marker id="cd-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 8</b> Four islands, plus a fifth worker used only for the task suite. That
+    fifth one is another <em>instance of the same worker file</em>, not a second file: the physics
+    engine's WebAssembly is bundled into each distinct worker entry, so a separate file would have
+    added another copy to the download.</figcaption>
+  </figure>
+
+  <div class="rule-card">
+    <span class="lbl">The counterintuitive result</span>
+    Four workers do <strong>not</strong> make generations arrive four times faster — a generation
+    is sequential and nothing can shorten it. What four workers buy is four populations searching
+    at once, which finds a wider variety of answers. Measured: 88 trials per second on one worker,
+    329 on four. Generations per second barely moves.
+  </div>
+
+  <div class="rule-card warn">
+    <span class="lbl">And the cost</span>
+    Multi-worker runs are <strong>not</strong> bit-reproducible. Migration is asynchronous, so a
+    migrant arriving before generation 7 rather than after changes everything downstream. One
+    worker is reproducible, and every guarantee the project makes is stated for the single-island
+    case. <code>?workers=1</code> is the flag for comparing runs.
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>render/</code> — drawing</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Plain canvas drawing, no framework. The render loop accumulates real elapsed time and steps
+    the physics a whole number of fixed steps, which is what keeps rule 1 true even though frames
+    arrive irregularly.</p>
+    <p>Two conventions here are easy to trip over. World coordinates have <strong>y pointing
+    up</strong>; canvas coordinates have y pointing <strong>down</strong>. The flip happens in
+    exactly one file and nowhere else. And the 2D renderer nudges the far leg sideways by a few
+    pixels — because a strictly side-on robot has both legs in exactly the same place and looks
+    like a pogo stick — which is the one place the drawing deliberately disagrees with the
+    simulation.</p>
+    <p>The 3D view is optional and dynamically imported, so the 500 kB of Three.js is only
+    downloaded if someone presses the button. The file that computes <em>how</em> a 2D simulation
+    becomes a 3D scene imports nothing from Three at all, which is why it can be tested in Node
+    without a graphics context.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>net/</code> — talking to the server</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>One rule shapes this entire folder: <strong>nothing here ever throws</strong>. Every
+    outcome — offline, timeout, a 404, a 500, an HTML error page from a proxy, or a 200 whose body
+    is not the JSON it claimed — becomes a result value describing what happened.</p>
+  </div>
+
+  <pre class="code"><b>type</b> ApiResult&lt;T&gt; =
+  | { ok: <b>true</b>;  data: T }
+  | { ok: <b>false</b>; error: ApiError }</pre>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Because failure is a value rather than an exception, there is no <code>try</code>/<code>catch</code>
+    anywhere else in the application, and no code path where a dead server matters. This was
+    measured rather than assumed: with the server killed mid-session, thirty generations still
+    evolved with zero unhandled rejections and no dialog — the only visible change was one amber
+    dot in the toolbar.</p>
+    <p>Every request carries a five-second timeout, because a request that hangs produces neither
+    an error to report nor a result to use, which is the only outcome worse than failing.</p>
+  </div>
+
+  <h3 style="font-size:22px;margin-top:34px"><code>challenges/</code> and <code>ui/help/</code> — teaching, as data</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Eleven challenge cards and eight help sections, all stored as plain data structures rather
+    than as markup. That choice is what allows automated tests to check them: that every card's
+    text placeholder names a real field, that every concept a card teaches has an explanatory
+    note and vice versa, that every element the help text describes actually exists in the page.</p>
+  </div>
+</section>
+
+<!-- ============================= 7 ============================= -->
+<section id="server" style="margin-top:64px">
+  <p class="eyebrow">07</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">The server — <code>server/</code></h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>One ASP.NET Core project in C#, about 500 lines. It shares no code with the browser — only
+    the shape of the JSON that passes between them. It is entirely optional; the application works
+    with it absent.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 800 300" role="img" aria-label="Server layers">
+      <rect class="bx-a" x="60" y="20" width="680" height="56" rx="4"/>
+      <text class="lbl" x="76" y="44">Endpoints.cs  —  nine endpoints, and no layer above them</text>
+      <text class="xs" x="76" y="62">the endpoint IS the handler. If a method would only forward to the repository, the endpoint calls the repository.</text>
+
+      <path class="ar" d="M400 78 L400 100" marker-end="url(#cd-h)"/>
+
+      <rect class="bx" x="60" y="104" width="330" height="70" rx="4"/>
+      <text class="lbl" x="76" y="128">IRunRepository</text>
+      <text class="xs" x="76" y="146">ICommunityArchive · ITrajectoryStore</text>
+      <text class="xs" x="76" y="163">materialised results, never a live query</text>
+
+      <rect class="bx" x="410" y="104" width="330" height="70" rx="4"/>
+      <text class="lbl" x="426" y="128">Contracts.cs</text>
+      <text class="xs" x="426" y="146">the DTOs — what crosses the wire,</text>
+      <text class="xs" x="426" y="163">deliberately narrower than the entities</text>
+
+      <path class="ar" d="M225 176 L225 198" marker-end="url(#cd-h)"/>
+
+      <rect class="bx" x="60" y="202" width="330" height="70" rx="4"/>
+      <text class="lbl" x="76" y="226">EF Core → SQLite</text>
+      <text class="xs" x="76" y="244">one file in server/.data/</text>
+      <text class="xs" x="76" y="261">plus content-addressed blobs on disk</text>
+
+      <rect x="410" y="202" width="330" height="70" rx="4" fill="none" stroke="var(--cyan)" stroke-dasharray="4 3"/>
+      <text class="lbl" x="426" y="226" fill="var(--cyan)">tests substitute here</text>
+      <text class="xs" x="426" y="246">fake repositories → no database, no disk</text>
+      <path class="ar" d="M406 139 C 470 139, 470 190, 480 198" stroke="var(--cyan)" marker-end="url(#cd-h)"/>
+
+      <defs>
+        <marker id="cd-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption><b>Fig 9</b> The repository interfaces exist for one reason: so endpoint tests need
+    no database and no disk. Swappability was never the argument — the ORM already provides that
+    for the price of a connection string.</figcaption>
+  </figure>
+
+  <div class="rule-card warn">
+    <span class="lbl">The lesson this layer taught, twice</span>
+    <p style="margin-bottom:8px"><strong>Fakes prove endpoint behaviour and cannot prove
+    persistence behaviour.</strong> Eleven endpoint tests passed while listing was broken in real
+    SQL: SQLite cannot sort by the date type being used, and the in-memory fake sorted it happily.
+    The server failed the first time it was started by hand.</p>
+    <p><strong>And a database built fresh in a test cannot prove upgrade behaviour.</strong> A
+    later change added a table; every test passed, because every test builds its database from
+    scratch, while every request against the existing database failed. Both bugs have the same
+    shape: the tests create the world as it should be, and reality arrives as it already is.</p>
+  </div>
+</section>
+
+<!-- ============================= 8 ============================= -->
+<section id="patterns" style="margin-top:64px">
+  <p class="eyebrow">08</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">Five patterns that repeat</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Once you have seen these five, most of the codebase stops holding surprises.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:32px">1 — Pass the evaluator in</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The core cannot import the simulator. So anything in the core that needs to simulate takes
+    a <em>function</em> that simulates as an argument:</p>
+  </div>
+  <pre class="code"><i>// the genetic algorithm</i>
+stepGeneration(island, <b>evaluate</b>)
+
+<i>// the task suite</i>
+runSuite(morph, gait, <b>evaluateGait</b>)</pre>
+  <div class="stack" style="max-width:76ch">
+    <p>Three things fall out of this. Tests can pass a synthetic evaluator and run the whole
+    algorithm in milliseconds. The command-line tools and the browser both pass the real one, so
+    there is exactly one implementation and it cannot drift into two. And the dependency arrow
+    stays pointing the right way.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:32px">2 — Configuration is data, not code</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Tasks, challenge cards, help sections, goal presets, keyboard shortcuts — all arrays of
+    plain objects. Data can be counted, cross-referenced and validated by a test; code branches
+    cannot. When the task suite needed a metric per task, the design called for an expression
+    language and it became a key into a lookup table instead: a parser and a sandbox to avoid a
+    six-entry table is a bad trade.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:32px">3 — Generate, do not retype</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The help section lists the keyboard shortcuts, and so does the toolbar hint strip, and so
+    does the key handler. Those were three descriptions of the same thing, free to drift apart.
+    Now there is one array; the handler dispatches from it, the hint strip is generated from it,
+    the help renders it.</p>
+    <p>The same applies to help's glossary of tasks and goals — it renders the real
+    <code>TASKS</code> and <code>PRESETS</code>, and tests assert <em>identity</em> rather than
+    similarity, because a paraphrase is exactly the drift the arrangement exists to prevent.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:32px">4 — One rule, written once</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>The archive's "higher fitness wins, ties keep the incumbent" rule is used when an island
+    inserts, when four islands are merged, and when a stored map is read back. All three go
+    through the same function. A merge that resolved ties differently from an insert would make
+    the displayed map disagree with the workers' maps in a way nobody would ever notice.</p>
+    <p>Where the rule genuinely has to exist twice — once in TypeScript, once in C# on the server
+    — the response is a test that pins the tie direction, verified by deliberately reversing the
+    comparison and watching the right test fail.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:32px">5 — Pure core, thin shell</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Wherever something needs a browser, the part that needs it is separated from the part that
+    does not. The 3D scene-building arithmetic is in a file that imports nothing from Three. The
+    scorecard's formatting logic is separate from the DOM it eventually writes to. The help
+    document's emphasis parser is separate from the elements it builds.</p>
+    <p>In each case the interesting half is testable in Node and the untestable half is a dozen
+    lines of <code>createElement</code>.</p>
+  </div>
+</section>
+
+<!-- ============================= 9 ============================= -->
+<section id="tests" style="margin-top:64px">
+  <p class="eyebrow">09</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">How the tests are designed</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>314 tests in the browser project running in about one and a half seconds, and 30 on the
+    server. The speed is not incidental — a suite that takes a second gets run before every change,
+    and one that takes a minute does not.</p>
+  </div>
+
+  <figure class="dg">
+    <svg viewBox="0 0 840 300" role="img" aria-label="What each kind of test can and cannot prove">
+      <rect class="bx-a" x="30" y="24" width="360" height="112" rx="4"/>
+      <text class="lbl" x="48" y="48">The golden test</text>
+      <text class="xs" x="48" y="70">one island, seed 4417, thirty generations</text>
+      <text class="xs" x="48" y="88">asserts the fitness is exactly 6.4598</text>
+      <text class="xs" x="48" y="112">catches: any change to the operators, the order</text>
+      <text class="xs" x="48" y="128">they run in, the physics, or the random sequence</text>
+
+      <rect class="bx" x="410" y="24" width="400" height="112" rx="4"/>
+      <text class="lbl" x="428" y="48">Regression guards</text>
+      <text class="xs" x="428" y="70">each one pins a bug that actually shipped, and each</text>
+      <text class="xs" x="428" y="88">has been verified to fail when the bug is reintroduced</text>
+      <text class="xs" x="428" y="112">"weighs about 21 kg" · "joint limits are enforced"</text>
+      <text class="xs" x="428" y="128">"motor authority" · the archive tie direction</text>
+
+      <rect class="bx" x="30" y="160" width="360" height="112" rx="4"/>
+      <text class="lbl" x="48" y="184">Identity tests</text>
+      <text class="xs" x="48" y="206">assert two things are the same object or the same</text>
+      <text class="xs" x="48" y="224">text, not merely similar</text>
+      <text class="xs" x="48" y="248">"help renders NOTES" · "the two renderers agree</text>
+      <text class="xs" x="48" y="264">on leg colours" · "traced and untraced runs match"</text>
+
+      <rect class="bx" x="410" y="160" width="400" height="112" rx="4"/>
+      <text class="lbl" x="428" y="184">Structural tests</text>
+      <text class="xs" x="428" y="206">read the source or the HTML and assert a rule</text>
+      <text class="xs" x="428" y="224">about it holds</text>
+      <text class="xs" x="428" y="248">"no gait panel re-runs the simulation" · "every</text>
+      <text class="xs" x="428" y="264">element help names exists in index.html"</text>
+    </svg>
+    <figcaption><b>Fig 10</b> Four kinds, each proving something a different kind cannot. The
+    structural tests are the unusual ones: they read files as text and assert properties of the
+    code itself.</figcaption>
+  </figure>
+
+  <div class="stack" style="max-width:76ch">
+    <h3 style="font-size:20px;margin-top:30px">Mutation testing, by hand</h3>
+    <p>A test that has never failed has never been shown to work. Several times in this project a
+    guard was verified by <em>deliberately reintroducing the bug</em> and confirming the right
+    test — and only the right test — went red. Reversing the archive's tie comparison from
+    <code>&gt;=</code> to <code>&gt;</code> fails the real-database test and leaves the
+    fake-backed endpoint test green, which is itself the proof that fakes cannot carry that rule.</p>
+
+    <h3 style="font-size:20px;margin-top:26px">The rule about failing tests</h3>
+  </div>
+
+  <div class="rule-card warn">
+    <span class="lbl">Never loosen a test to make a change pass</span>
+    If a test fails, either the change is wrong or the change is deliberate. Say which, in the
+    commit message, and update the expected value in the same commit. Three of the tests in this
+    project are guards for bugs that actually shipped, and they are the cheapest insurance
+    available.
+  </div>
+</section>
+
+<!-- ============================= 10 ============================= -->
+<section id="adding" style="margin-top:64px">
+  <p class="eyebrow">10</p>
+  <h2 style="font-size:clamp(26px,3.4vw,38px);margin:8px 0 20px">Adding something new</h2>
+
+  <div class="stack" style="max-width:76ch">
+    <p>Three worked routes through the layers, in increasing order of blast radius.</p>
+  </div>
+
+  <h3 style="font-size:21px;margin-top:30px">A new panel — the easy case</h3>
+  <ol style="max-width:74ch;padding-left:22px;line-height:1.7">
+    <li>Write a <code>createXPanel(host, handlers)</code> in <code>ui/</code> that returns an
+    object with methods for updating it. Keep the formatting logic in exported pure functions.</li>
+    <li>Add a container <code>&lt;div id="x"&gt;</code> in <code>index.html</code>.</li>
+    <li>Wire it in <code>main.ts</code>: create it, call its update method from the paint loop.</li>
+    <li>Give its header an id and add a row to the help content so it gets a <code>?</code>.</li>
+  </ol>
+  <p style="max-width:76ch;margin-top:12px">Nothing below <code>apps/web</code> changes. This is
+  most new work.</p>
+
+  <h3 style="font-size:21px;margin-top:30px">A new task for the scorecard</h3>
+  <ol style="max-width:74ch;padding-left:22px;line-height:1.7">
+    <li>Add an entry to <code>TASKS</code> in <code>evolution/tasks.ts</code> — terrain, duration,
+    metric, thresholds, and a sentence saying what failing it tells you.</li>
+    <li>If it needs a new terrain shape, add a case to <code>TerrainSpec</code> and its height
+    arithmetic, and a matching collider in <code>sim/world.ts</code>.</li>
+    <li>Run <code>npm run tasks -- --calibrate</code> and set the thresholds from the table it
+    prints, rather than from taste.</li>
+  </ol>
+  <div class="rule-card">
+    <span class="lbl">The rule that decides whether it is a real task</span>
+    A task whose own parameter barely moves its result is broken, not hard. Two of the eight
+    originally specified tasks were cut by this rule — one because the physics has no sideways
+    axis for it to exist in, and one because the ground representation cost more than the terrain
+    did, measured at 1.70 m, 1.14 m and 1.15 m for zero, one and three centimetres of roughness.
+  </div>
+
+  <h3 style="font-size:21px;margin-top:30px">A new gene — the expensive case</h3>
+  <div class="stack" style="max-width:76ch">
+    <p>Adding a twelfth number to the genome touches the encoder, the decoder, the gene-range
+    table, the slider panel, the URL format and the stepper's gene strips. More importantly it
+    <strong>invalidates every stored gait and moves the golden number</strong>, because an
+    eleven-number genome and a twelve-number genome are not comparable.</p>
+    <p>That is a deliberate cost. The genome is fixed at eleven because that keeps it comparable
+    across bodies — you can evolve a gait, lengthen the robot's legs and watch it fall over, and
+    the shared behaviour map can merge cells contributed by different people. Both properties
+    depend on every genome meaning the same thing.</p>
+  </div>
+</section>
+
+<!-- ============================= close ============================= -->
+<section style="margin-top:64px;margin-bottom:80px">
+  <div class="rule-card">
+    <span class="lbl">If you read nothing else</span>
+    <p style="margin-bottom:8px">The core is pure arithmetic and cannot reach the physics engine
+    or the screen. Anything that needs to simulate takes a function that simulates as an argument.
+    Randomness is seeded and physics steps at a fixed rate, which together make runs reproducible.
+    Reproducibility makes the golden test possible, and the golden test is what makes it safe to
+    change anything at all.</p>
+    <p>Every other rule in this document exists to protect one of those four sentences.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap" style="padding:30px 0 60px;border-top:1px solid var(--rule);margin-top:20px">
+  <p style="font-size:14px;color:var(--ink-3)">
+    Companion to <a href="technical-design.html">technical-design.html</a> (architecture and
+    interface) and <a href="implementation.md">implementation.md</a> (what was built, in what
+    order, and what it cost to find out).
+  </p>
+</footer>
+
+</body>
+</html>

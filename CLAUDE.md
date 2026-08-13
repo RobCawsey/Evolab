@@ -6,6 +6,9 @@ slices. Teaching tool first, simulator second.
 
 Two documents, different jobs:
 
+- **[docs/code-design.html](docs/code-design.html)** — how the *code* is organised, for a
+  reader who has never seen the project. Layers and dependency direction, the nine core types,
+  module by module, the repeating patterns, and how the tests are designed. Ten diagrams.
 - **[docs/technical-design.html](docs/technical-design.html)** — the architecture and UI
   specification. Open it in a browser. 16 sections, 16 figures, every architectural
   decision and *why* it was made. Stable; changes only when a decision changes.

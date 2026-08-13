@@ -142,6 +142,10 @@ Three and `rapier2d-compat` at runtime.
   specification. Open it in a browser. Sixteen sections, seventeen figures, and every
   architectural decision with the reasoning that produced it. It is stable, and where the build
   proved it wrong it carries an amendment rather than a quiet edit — there are five.
+- **[docs/code-design.html](docs/code-design.html)** — how the code itself is organised, written
+  for someone who has never seen the project. The four layers and why dependencies only point one
+  way, the nine types everything is made of, what each module does, and the five patterns that
+  repeat. Ten diagrams. Start here if you are going to change something.
 - **[docs/implementation.md](docs/implementation.md)** — how each slice was built and in what
   order, with the measurements that settled each decision. A living document.
 - **[CLAUDE.md](CLAUDE.md)** — the working context: current state, the invariants, and the
